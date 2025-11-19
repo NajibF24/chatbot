@@ -18,7 +18,6 @@ services:
           memory: 512M
         reservations:
           memory: 256M
-    # Simple healthcheck
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 30s
@@ -46,6 +45,12 @@ services:
       - SMARTSHEET_PRIMARY_SHEET_ID=${SMARTSHEET_PRIMARY_SHEET_ID:-7472905240661892}
       - FRONTEND_URL=${FRONTEND_URL:-http://16.79.23.146}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://16.79.23.146,http://localhost}
+      # ✅ NEW: Puppeteer environment
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    volumes:
+      # ✅ NEW: Persist screenshot files (OPTIONAL)
+      - screenshot_data:/usr/src/app/data/screenshots
     depends_on:
       mongo:
         condition: service_healthy
@@ -54,9 +59,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 1024M  # ✅ INCREASED: Puppeteer needs more memory
         reservations:
-          memory: 384M
+          memory: 512M   # ✅ INCREASED
     logging:
       driver: "json-file"
       options:
@@ -97,4 +102,7 @@ networks:
 
 volumes:
   mongo_data:
+    driver: local
+  # ✅ NEW: Volume for screenshot persistence (OPTIONAL)
+  screenshot_data:
     driver: local

@@ -1,4 +1,4 @@
-// server/routes/chat.js - COMPLETE FIXED: Natural Smartsheet Dashboard Response
+// server/routes/chat.js - FIXED: Multiple Files + Smartsheet Analysis
 import express from 'express';
 import OpenAI from 'openai';
 import Chat from '../models/Chat.js';
@@ -128,113 +128,34 @@ router.post('/message', requireAuth, async (req, res) => {
     if (bot.smartsheetEnabled && bot.smartsheetConfig?.primarySheetId) {
       console.log('📊 Smartsheet Bot detected');
 
-      // ✅ PRIORITY 1: Check if user is requesting a file/dashboard
+      // ✅ PRIORITY 1: Check if user is requesting a file
       const isFileReq = fileManager.isFileRequest(message);
       
       if (isFileReq) {
-        console.log('📁 Dashboard/File request detected');
+        console.log('📁 File request detected');
         
         // Extract query from message
         const fileQuery = fileManager.extractFileQuery(message);
         console.log(`   Query: "${fileQuery}"`);
         
-        // ✅ Search for ALL matching files
+        // ✅ FIXED: Search for ALL matching files
         const foundFiles = await fileManager.searchFiles(fileQuery);
         
         if (foundFiles.length > 0) {
           console.log(`✅ Found ${foundFiles.length} file(s)`);
           
-          // ✅ Attach ALL found files
+          // ✅ CHANGED: Attach ALL found files, not just first one
           attachedFiles = foundFiles;
           
-          // ✅ IMPROVED: Natural response as if from Smartsheet Dashboard
-          const imageFiles = foundFiles.filter(f => f.type === 'image');
-          const pdfFiles = foundFiles.filter(f => f.type === 'pdf');
-          const otherFiles = foundFiles.filter(f => f.type === 'document');
+          // ✅ SIMPLIFIED: Just list files, no explanation (files will show)
+          assistantMessage = `Ditemukan ${foundFiles.length} file:\n\n`;
+          foundFiles.forEach((f, idx) => {
+            assistantMessage += `${idx + 1}. ${f.name}\n`;
+            assistantMessage += `   Tipe: ${f.type.toUpperCase()} • Ukuran: ${f.sizeKB} KB\n`;
+          });
+          assistantMessage += `\nSemua file ditampilkan di atas.`;
           
-          // Detect project name from file names or query
-          let projectName = 'Project';
-          if (fileQuery.toLowerCase().includes('iot')) {
-            projectName = 'IoT Calipers';
-          } else if (fileQuery.toLowerCase().includes('caliper')) {
-            projectName = 'IoT Calipers';
-          }
-          
-          if (imageFiles.length > 0 && pdfFiles.length === 0 && otherFiles.length === 0) {
-            // ✅ Only images - Natural response
-            assistantMessage = `Berikut adalah update visual terbaru dari Dashboard ${projectName}:\n\n`;
-            assistantMessage += `Dashboard ini menampilkan:\n`;
-            assistantMessage += `• Status progress dan milestone project\n`;
-            assistantMessage += `• Timeline pelaksanaan dan target\n`;
-            assistantMessage += `• Task breakdown berdasarkan status\n`;
-            assistantMessage += `• Picture update dan dokumentasi\n\n`;
-            
-            if (imageFiles.length === 1) {
-              assistantMessage += `Gambar dashboard ditampilkan di atas.`;
-            } else {
-              assistantMessage += `${imageFiles.length} gambar dashboard ditampilkan di atas.`;
-            }
-            
-          } else if (pdfFiles.length > 0 && imageFiles.length === 0 && otherFiles.length === 0) {
-            // ✅ Only PDFs - Natural response
-            assistantMessage = `Berikut adalah dokumen dashboard lengkap untuk ${projectName}:\n\n`;
-            assistantMessage += `Dokumen ini berisi:\n`;
-            assistantMessage += `• Overview lengkap project\n`;
-            assistantMessage += `• Detail status dan progress\n`;
-            assistantMessage += `• Timeline dan milestone\n`;
-            assistantMessage += `• Analisis risiko dan issue\n\n`;
-            
-            if (pdfFiles.length === 1) {
-              assistantMessage += `Dokumen PDF ditampilkan di atas untuk preview langsung.`;
-            } else {
-              assistantMessage += `${pdfFiles.length} dokumen PDF ditampilkan di atas.`;
-            }
-            
-          } else if (imageFiles.length > 0 && pdfFiles.length > 0) {
-            // ✅ Mixed - Natural response
-            assistantMessage = `Berikut adalah dashboard update untuk ${projectName}:\n\n`;
-            assistantMessage += `VISUAL UPDATE:\n`;
-            assistantMessage += `• ${imageFiles.length} gambar dashboard real-time\n`;
-            assistantMessage += `• ${pdfFiles.length} dokumen report lengkap\n\n`;
-            assistantMessage += `Dashboard ini mencakup:\n`;
-            assistantMessage += `• Real-time project tracking\n`;
-            assistantMessage += `• Status task dan deliverables\n`;
-            assistantMessage += `• Timeline progress\n`;
-            assistantMessage += `• Documentation dan picture update\n\n`;
-            assistantMessage += `Semua file dashboard ditampilkan di atas.`;
-            
-          } else {
-            // ✅ Other files or mixed with documents
-            assistantMessage = `Berikut adalah file terkait ${projectName}:\n\n`;
-            
-            if (imageFiles.length > 0) {
-              assistantMessage += `VISUAL:\n`;
-              imageFiles.forEach(f => {
-                assistantMessage += `• ${f.name.replace(/\.(jpg|jpeg|png|gif)$/i, '')}\n`;
-              });
-              assistantMessage += `\n`;
-            }
-            
-            if (pdfFiles.length > 0) {
-              assistantMessage += `DOKUMEN:\n`;
-              pdfFiles.forEach(f => {
-                assistantMessage += `• ${f.name.replace(/\.pdf$/i, '')}\n`;
-              });
-              assistantMessage += `\n`;
-            }
-            
-            if (otherFiles.length > 0) {
-              assistantMessage += `FILE LAINNYA:\n`;
-              otherFiles.forEach(f => {
-                assistantMessage += `• ${f.name}\n`;
-              });
-              assistantMessage += `\n`;
-            }
-            
-            assistantMessage += `Semua file ditampilkan di atas.`;
-          }
-          
-          // ✅ Prepare attached files properly
+          // ✅ FIXED: Prepare attached files properly
           const fileAttachments = attachedFiles.map(f => ({
             name: String(f.name),
             path: String(f.relativePath),
@@ -243,10 +164,7 @@ router.post('/message', requireAuth, async (req, res) => {
             size: String(f.sizeKB)
           }));
           
-          console.log('📎 Attaching files:', fileAttachments.length);
-          fileAttachments.forEach(f => {
-            console.log(`   - ${f.name} (${f.type}) → ${f.path}`);
-          });
+          console.log('📎 File attachments:', JSON.stringify(fileAttachments, null, 2));
           
           // ✅ CRITICAL: Save to chat WITH attachedFiles
           chat.messages.push({
@@ -266,42 +184,27 @@ router.post('/message', requireAuth, async (req, res) => {
             attachedFiles: fileAttachments  // ← MUST be in response
           });
         } else {
-          // ✅ No files found - Natural response
+          // No files found - show available files
           console.log('⚠️  No matching files found');
           
           const allFiles = await fileManager.listFiles();
           
           if (allFiles.length === 0) {
-            assistantMessage = 'Maaf, saat ini belum ada dashboard visual yang tersedia untuk project ini.\n\n';
-            assistantMessage += 'Dashboard akan tersedia setelah ada update terbaru dari tim project.';
+            assistantMessage = 'Maaf, saat ini tidak ada file yang tersedia di server.\n\n';
+            assistantMessage += 'Silakan tambahkan file ke folder: server/data/files/';
           } else {
-            assistantMessage = `Maaf, dashboard untuk "${fileQuery}" belum tersedia atau nama project tidak cocok.\n\n`;
-            assistantMessage += 'DASHBOARD YANG TERSEDIA:\n\n';
+            assistantMessage = `Maaf, tidak ditemukan file yang sesuai dengan "${fileQuery}".\n\n`;
+            assistantMessage += 'FILE YANG TERSEDIA:\n\n';
             
-            // Group files by type for better presentation
-            const images = allFiles.filter(f => f.type === 'image');
-            const pdfs = allFiles.filter(f => f.type === 'pdf');
+            allFiles.slice(0, 15).forEach((f, idx) => {
+              assistantMessage += `${idx + 1}. ${f.name} (${f.type})\n`;
+            });
             
-            if (images.length > 0) {
-              assistantMessage += 'VISUAL DASHBOARD:\n';
-              images.slice(0, 5).forEach((f, idx) => {
-                const projectName = f.name.replace(/dashboard-|-\d+\.(jpg|jpeg|png|gif)$/gi, '').replace(/-/g, ' ');
-                assistantMessage += `• ${projectName}\n`;
-              });
-              assistantMessage += `\n`;
+            if (allFiles.length > 15) {
+              assistantMessage += `\n...dan ${allFiles.length - 15} file lainnya.\n`;
             }
             
-            if (pdfs.length > 0) {
-              assistantMessage += 'PDF REPORTS:\n';
-              pdfs.slice(0, 5).forEach((f, idx) => {
-                const projectName = f.name.replace(/dashboard-|-report\.pdf$/gi, '').replace(/-/g, ' ');
-                assistantMessage += `• ${projectName}\n`;
-              });
-              assistantMessage += `\n`;
-            }
-            
-            assistantMessage += `Sebutkan nama project yang lebih spesifik, misalnya:\n`;
-            assistantMessage += `"Tampilkan dashboard IoT" atau "Tampilkan dashboard Caliper"`;
+            assistantMessage += `\nSebutkan nama file yang lebih spesifik untuk melihatnya.`;
           }
           
           chat.messages.push({
@@ -342,7 +245,7 @@ router.post('/message', requireAuth, async (req, res) => {
 
 Anda memiliki akses ke:
 1. Data proyek REAL-TIME dari Smartsheet
-2. Dashboard visual dan dokumen project
+2. File dan dokumen di server (gambar, PDF, dokumen)
 
 ${formattedContext}
 
@@ -356,18 +259,17 @@ ${fileContext}
    - Membuat laporan dan summary
    - Menjawab pertanyaan tentang project metrics, timeline, budget
 
-2. DASHBOARD VISUAL (dari Smartsheet)
-   - Menampilkan dashboard gambar project (langsung tampil di chat)
-   - Menampilkan dokumen PDF report (langsung tampil di chat)
-   - Mencari dan menampilkan semua dashboard yang cocok
+2. MANAJEMEN FILE (dari server)
+   - Menampilkan gambar dashboard (langsung tampil di chat)
+   - Menampilkan dokumen PDF (langsung tampil di chat)
+   - Mencari dan menampilkan semua file yang cocok
 
-**RESPONS UNTUK DASHBOARD REQUEST:**
+**RESPONS UNTUK FILE REQUEST:**
 
-Jika user meminta dashboard/gambar/visual:
-• Jelaskan bahwa ini adalah update dari Smartsheet Dashboard
-• Dashboard akan otomatis tampil di chat
-• JANGAN suruh user klik tombol apapun
-• Berikan konteks tentang isi dashboard
+Jika user meminta file/dashboard/gambar:
+• Jelaskan file apa yang ditemukan
+• JANGAN suruh user klik tombol (file otomatis tampil)
+• Jika ada banyak file dengan nama serupa, semua akan ditampilkan
 
 **ATURAN FORMATTING:**
 
@@ -386,8 +288,8 @@ Jawab dalam Bahasa Indonesia profesional.
 
 INGAT: 
 - Untuk analisis proyek, gunakan data Smartsheet
-- Untuk dashboard/visual, sistem otomatis menampilkan file
-- Dashboard adalah update langsung dari Smartsheet
+- Untuk file/gambar, sistem akan otomatis menampilkan semua file yang cocok
+- File baru akan otomatis terdeteksi saat user bertanya
 - JANGAN gunakan markdown syntax (**, *, \`)`;
 
         if (shouldRefresh) {
@@ -404,13 +306,13 @@ INGAT:
 
 Maaf, saat ini data Smartsheet tidak dapat diakses. Namun Anda masih dapat:
 
-1. Menampilkan dashboard visual yang tersedia
-2. Mencari dokumen project
-3. Membuka file PDF report
+1. Menampilkan file dan dokumen yang tersedia
+2. Mencari gambar dashboard
+3. Membuka dokumen PDF
 
 ${fileContext}
 
-Silakan sebutkan dashboard yang ingin Anda lihat.`;
+Silakan sebutkan file yang ingin Anda lihat, atau saya bantu mencari file yang tersedia.`;
       }
 
     } else {

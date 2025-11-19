@@ -1,17 +1,30 @@
-// client/src/components/ChatMessage.jsx - FIXED: Proper URL handling
+// client/src/components/ChatMessage.jsx - FIXED: Use correct base URL
 import React, { useState } from 'react';
 
 function ChatMessage({ message }) {
   const [imageExpanded, setImageExpanded] = useState(false);
-  const [imageError, setImageError] = useState(false);
   const isUser = message.role === 'user';
 
-  // ✅ FIXED: Simple relative URL (nginx will proxy)
+  // ✅ Get base URL from window location
   const getFileUrl = (relativePath) => {
-    // Just use the path as-is (already correct from backend)
-    console.log(`📎 Loading file: ${relativePath}`);
-    return relativePath; 
+    // If already absolute URL, return as is
+    if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+      return relativePath;
+    }
+    
+    // Build absolute URL using current window location
+    const protocol = window.location.protocol;
+    const host = window.location.host;
+    
+    // Remove leading slash if exists
+    const cleanPath = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
+    
+    const fullUrl = `${protocol}//${host}${cleanPath}`;
+    console.log(`📎 File URL: ${relativePath} → ${fullUrl}`);
+    
+    return fullUrl;
   };
+
   // ✅ Check if message has attached files
   const hasAttachedFiles = message.attachedFiles && message.attachedFiles.length > 0;
 
@@ -137,9 +150,9 @@ function ChatMessage({ message }) {
     return parts.length > 0 ? parts : text;
   };
 
-  // ✅ Render attached file - Direct display with error handling
+  // ✅ Render attached file - Direct display
   const renderAttachedFile = (file, index) => {
-    console.log(`📎 Rendering file [${index}]:`, file);
+    console.log('📎 Rendering file:', file);
     const fileUrl = getFileUrl(file.path);
     
     if (file.type === 'image') {
@@ -158,57 +171,40 @@ function ChatMessage({ message }) {
             </div>
           </div>
 
-          {/* Image Display */}
-          {!imageError ? (
-            <div 
-              className="relative cursor-pointer group bg-steel-50 border-x border-b border-steel-200 rounded-b-lg overflow-hidden"
-              onClick={() => setImageExpanded(!imageExpanded)}
-            >
-              <img 
-                src={fileUrl}
-                alt={file.name}
-                className={`w-full transition-all duration-300 ${
-                  imageExpanded ? 'max-h-none' : 'max-h-[600px] object-contain'
-                }`}
-                onError={(e) => {
-                  console.error(`❌ Image load error: ${fileUrl}`);
-                  console.error(`   File:`, file);
-                  setImageError(true);
-                  e.target.style.display = 'none';
-                }}
-                onLoad={() => {
-                  console.log(`✅ Image loaded: ${fileUrl}`);
-                }}
-              />
-              
-              {/* Expand hint */}
-              {!imageExpanded && (
-                <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
-                  Klik untuk memperbesar
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="border-x border-b border-red-200 rounded-b-lg bg-red-50 p-4">
-              <div className="flex items-center space-x-2 text-red-600">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <div>
-                  <div className="font-semibold">Gagal memuat gambar</div>
-                  <div className="text-sm">Path: {fileUrl}</div>
-                  <a 
-                    href={fileUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-xs text-primary-600 hover:underline"
-                  >
-                    Coba buka di tab baru →
-                  </a>
-                </div>
+          {/* Image Display - Click to expand */}
+          <div 
+            className="relative cursor-pointer group bg-steel-50 border-x border-b border-steel-200 rounded-b-lg overflow-hidden"
+            onClick={() => setImageExpanded(!imageExpanded)}
+          >
+            <img 
+              src={fileUrl}
+              alt={file.name}
+              className={`w-full transition-all duration-300 ${
+                imageExpanded ? 'max-h-none' : 'max-h-[600px] object-contain'
+              }`}
+              onError={(e) => {
+                console.error('❌ Image load error:', fileUrl);
+                console.error('   Original path:', file.path);
+                e.target.style.display = 'none';
+                
+                // Show error message
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'p-4 text-red-600 text-center';
+                errorDiv.textContent = `Failed to load image: ${file.name}`;
+                e.target.parentElement.appendChild(errorDiv);
+              }}
+              onLoad={() => {
+                console.log('✅ Image loaded successfully:', fileUrl);
+              }}
+            />
+            
+            {/* Expand/Collapse overlay hint */}
+            {!imageExpanded && (
+              <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+                Klik untuk memperbesar
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       );
     } else if (file.type === 'pdf') {
@@ -227,7 +223,7 @@ function ChatMessage({ message }) {
             </div>
           </div>
 
-          {/* PDF Viewer */}
+          {/* PDF Viewer - Direct embed */}
           <div className="border-x border-b border-steel-200 rounded-b-lg overflow-hidden bg-steel-50">
             <iframe
               src={fileUrl}
@@ -239,7 +235,7 @@ function ChatMessage({ message }) {
         </div>
       );
     } else {
-      // Other document types
+      // Other document types - Show preview
       return (
         <div key={index} className="mb-4 w-full">
           <div className="bg-steel-100 rounded-lg border border-steel-200 overflow-hidden">
@@ -294,9 +290,9 @@ function ChatMessage({ message }) {
           {/* ✅ Attached Files - Display ALL files directly */}
           {hasAttachedFiles && !isUser && (
             <div className="w-full mb-3">
-              {console.log(`📎 Rendering ${message.attachedFiles.length} file(s)`)}
+              {console.log('📎 Rendering attached files:', message.attachedFiles.length)}
               {message.attachedFiles.map((file, idx) => {
-                console.log(`   File ${idx}:`, file);
+                console.log(`📎 File ${idx}:`, file);
                 return renderAttachedFile(file, idx);
               })}
             </div>

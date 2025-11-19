@@ -1,14 +1,6 @@
 // server/models/Chat.js - UPDATED WITH FILE SUPPORT
 import mongoose from 'mongoose';
 
-const attachedFileSchema = new mongoose.Schema({
-  name: { type: String, required: false },
-  path: { type: String, required: false },
-  type: { type: String, required: false },
-  extension: { type: String, required: false },
-  size: { type: String, required: false }
-}, { _id: false });
-
 const messageSchema = new mongoose.Schema({
   role: {
     type: String,
@@ -25,11 +17,14 @@ const messageSchema = new mongoose.Schema({
       return String(value);
     }
   },
-  // ✅ FIXED: Proper schema for attached files
-  attachedFiles: {
-    type: [attachedFileSchema],
-    default: undefined
-  },
+  // ✅ NEW: Support for attached files
+  attachedFiles: [{
+    name: String,
+    path: String,
+    type: String,
+    extension: String,
+    size: String
+  }],
   timestamp: {
     type: Date,
     default: Date.now

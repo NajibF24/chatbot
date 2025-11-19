@@ -58,43 +58,18 @@ function Chat({ user, handleLogout }) {
     setInputMessage('');
     setLoading(true);
 
-    // Add user message immediately
-    const userMsg = { 
-      role: 'user', 
-      content: userMessage, 
-      timestamp: new Date() 
-    };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => [...prev, { role: 'user', content: userMessage, timestamp: new Date() }]);
 
     try {
-      console.log('📤 Sending message:', userMessage);
-      
       const response = await axios.post('/api/chat/message', {
         botId: selectedBot._id,
         message: userMessage
       });
 
-      console.log('📥 Response received:', response.data);
-
-      // ✅ CRITICAL: Create assistant message with attachedFiles from response
-      const assistantMsg = {
-        role: 'assistant',
-        content: response.data.message,
-        timestamp: new Date()
-      };
-
-      // ✅ CRITICAL: Add attachedFiles if present
-      if (response.data.attachedFiles && response.data.attachedFiles.length > 0) {
-        assistantMsg.attachedFiles = response.data.attachedFiles;
-        console.log('📎 Attached files:', assistantMsg.attachedFiles);
-      }
-
-      setMessages(prev => [...prev, assistantMsg]);
-
+      setMessages(prev => [...prev, { role: 'assistant', content: response.data.message, timestamp: new Date() }]);
     } catch (error) {
-      console.error('❌ Error sending message:', error);
+      console.error('Error sending message:', error);
       alert(error.response?.data?.error || 'Failed to send message.');
-      // Remove user message on error
       setMessages(prev => prev.slice(0, -1));
     } finally {
       setLoading(false);
@@ -269,10 +244,8 @@ function Chat({ user, handleLogout }) {
                   </p>
                 </div>
               ) : (
-                <div className="max-w-5xl mx-auto space-y-4">
-                  {messages.map((msg, idx) => (
-                    <ChatMessage key={idx} message={msg} />
-                  ))}
+                <div className="max-w-4xl mx-auto space-y-4">
+                  {messages.map((msg, idx) => <ChatMessage key={idx} message={msg} />)}
                   {loading && (
                     <div className="flex items-center space-x-2 text-steel-500">
                       <div className="flex space-x-1">
@@ -305,7 +278,7 @@ function Chat({ user, handleLogout }) {
         {/* Input Area */}
         {selectedBot && (
           <div className="bg-white border-t border-steel-200 p-4 shadow-lg">
-            <form onSubmit={handleSendMessage} className="max-w-5xl mx-auto">
+            <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto">
               <div className="flex space-x-3">
                 <input
                   type="text"

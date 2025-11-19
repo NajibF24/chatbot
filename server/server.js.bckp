@@ -1,11 +1,10 @@
-// server/server.js - COMPLETE FIXED VERSION WITH PROPER FILE SERVING
+// server/server.js - UPDATED WITH FILE SERVING
 import express from 'express';
 import session from 'express-session';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs/promises';
 import { connectDB } from './config/db.js';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
@@ -97,11 +96,11 @@ app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   const origin = req.get('origin') || 'none';
   const method = req.method;
-  const reqPath = req.path;
+  const path = req.path;
   
-  console.log(`[${timestamp}] ${method} ${reqPath} - Origin: ${origin}`);
+  console.log(`[${timestamp}] ${method} ${path} - Origin: ${origin}`);
   
-  if (reqPath.startsWith('/api/auth')) {
+  if (path.startsWith('/api/auth')) {
     console.log(`   Session ID: ${req.sessionID || 'none'}`);
     console.log(`   User ID: ${req.session?.userId || 'none'}`);
   }
@@ -109,172 +108,41 @@ app.use((req, res, next) => {
   next();
 });
 
-// ==================== FILE SERVING - CRITICAL SECTION ====================
-
+// ✅ NEW: Serve files directory
 const filesPath = path.join(__dirname, 'data', 'files');
-
-// Ensure files directory exists
-try {
-  await fs.mkdir(filesPath, { recursive: true });
-  console.log('✅ Files directory ready:', filesPath);
-} catch (error) {
-  console.error('⚠️  Could not create files directory:', error.message);
-}
-
-// ✅ CRITICAL FIX: Proper file serving with CORS and Content-Type
-app.use('/api/files', async (req, res, next) => {
-  console.log(`📁 File request: ${req.path}`);
-  
-  // Set CORS headers FIRST (before any response)
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Content-Type');
-  
-  // Handle OPTIONS preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
-  
-  // Get file extension and set proper Content-Type
-  const ext = path.extname(req.path).toLowerCase();
-  
-  // Set Content-Type based on extension
-  if (['.jpg', '.jpeg'].includes(ext)) {
-    res.setHeader('Content-Type', 'image/jpeg');
-  } else if (ext === '.png') {
-    res.setHeader('Content-Type', 'image/png');
-  } else if (ext === '.gif') {
-    res.setHeader('Content-Type', 'image/gif');
-  } else if (ext === '.webp') {
-    res.setHeader('Content-Type', 'image/webp');
-  } else if (ext === '.pdf') {
-    res.setHeader('Content-Type', 'application/pdf');
-  } else if (ext === '.svg') {
-    res.setHeader('Content-Type', 'image/svg+xml');
-  }
-  
-  // Allow inline viewing (not forcing download)
-  res.setHeader('Content-Disposition', 'inline');
-  
-  // Cache control
-  res.setHeader('Cache-Control', 'public, max-age=3600');
-  
-  // Remove any CSP headers that might block images
-  res.removeHeader('Content-Security-Policy');
-  res.removeHeader('X-Content-Security-Policy');
-  
-  console.log(`   Extension: ${ext}`);
-  console.log(`   Content-Type: ${res.getHeader('Content-Type')}`);
-  
-  next();
-}, express.static(filesPath, {
-  dotfiles: 'ignore',
-  index: false,
+app.use('/api/files', express.static(filesPath, {
   setHeaders: (res, filepath) => {
-    const filename = path.basename(filepath);
-    console.log(`   ✅ Serving: ${filename}`);
+    const ext = path.extname(filepath).toLowerCase();
+    
+    // Set appropriate content type
+    if (['.jpg', '.jpeg'].includes(ext)) {
+      res.setHeader('Content-Type', 'image/jpeg');
+    } else if (ext === '.png') {
+      res.setHeader('Content-Type', 'image/png');
+    } else if (ext === '.gif') {
+      res.setHeader('Content-Type', 'image/gif');
+    } else if (ext === '.pdf') {
+      res.setHeader('Content-Type', 'application/pdf');
+    } else if (ext === '.webp') {
+      res.setHeader('Content-Type', 'image/webp');
+    }
+    
+    // Allow inline viewing (not download)
+    res.setHeader('Content-Disposition', 'inline');
+    
+    // Cache for 1 hour
+    res.setHeader('Cache-Control', 'public, max-age=3600');
   }
 }));
 
-// ✅ DEBUG ENDPOINT: List all available files
-app.get('/api/files-debug', async (req, res) => {
-  try {
-    const files = await fs.readdir(filesPath);
-    const fileList = [];
-    
-    for (const file of files) {
-      const filePath = path.join(filesPath, file);
-      const stats = await fs.stat(filePath);
-      
-      if (stats.isFile()) {
-        fileList.push({
-          name: file,
-          size: stats.size,
-          sizeKB: (stats.size / 1024).toFixed(2),
-          url: `/api/files/${file}`,
-          fullUrl: `http://${req.get('host')}/api/files/${file}`,
-          extension: path.extname(file),
-          modified: stats.mtime
-        });
-      }
-    }
-    
-    res.json({
-      success: true,
-      filesDirectory: filesPath,
-      totalFiles: fileList.length,
-      files: fileList,
-      note: 'Access files at: /api/files/{filename}'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      filesDirectory: filesPath
-    });
-  }
-});
+console.log('📁 Files directory:', filesPath);
+console.log('📁 Files served at: /api/files/*');
 
-// ✅ TEST ENDPOINT: Test specific file
-app.get('/api/files-test/:filename', async (req, res) => {
-  try {
-    const filename = req.params.filename;
-    const filePath = path.join(filesPath, filename);
-    
-    // Check if file exists
-    try {
-      const stats = await fs.stat(filePath);
-      
-      res.json({
-        success: true,
-        filename: filename,
-        exists: true,
-        size: stats.size,
-        sizeKB: (stats.size / 1024).toFixed(2),
-        path: filePath,
-        url: `/api/files/${filename}`,
-        fullUrl: `http://${req.get('host')}/api/files/${filename}`,
-        testUrl: `curl -I http://${req.get('host')}/api/files/${filename}`
-      });
-    } catch (error) {
-      // File doesn't exist
-      const allFiles = await fs.readdir(filesPath);
-      
-      res.json({
-        success: false,
-        filename: filename,
-        exists: false,
-        error: 'File not found',
-        path: filePath,
-        availableFiles: allFiles,
-        suggestion: `Maybe you meant: ${allFiles.find(f => f.toLowerCase().includes(filename.toLowerCase())) || 'none'}`
-      });
-    }
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-console.log('');
-console.log('📁 FILE SERVING CONFIGURED:');
-console.log(`   Directory: ${filesPath}`);
-console.log(`   Base URL: /api/files/*`);
-console.log(`   Debug URL: /api/files-debug`);
-console.log(`   Test URL: /api/files-test/{filename}`);
-console.log('');
-
-// ==================== API ROUTES ====================
-
+// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/smartsheet', smartsheetRoutes);
-
-// ==================== UTILITY ENDPOINTS ====================
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -298,7 +166,7 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({ 
     message: 'Internal Chat API Server with Smartsheet Integration & File Management',
-    version: '2.0.1',
+    version: '2.0.0',
     environment: process.env.NODE_ENV || 'development',
     endpoints: {
       health: '/health',
@@ -306,50 +174,24 @@ app.get('/', (req, res) => {
       admin: '/api/admin/*',
       chat: '/api/chat/*',
       smartsheet: '/api/smartsheet/*',
-      files: '/api/files/*',
-      filesDebug: '/api/files-debug',
-      filesTest: '/api/files-test/{filename}'
+      files: '/api/files/*'
     },
     features: [
       'Smartsheet Integration',
       'File Management (Images, PDFs, Documents)',
       'Real-time Project Data',
-      'AI Chat Assistant',
-      'CORS Enabled',
-      'Proper Content-Type Headers',
-      'Debug Endpoints'
+      'AI Chat Assistant'
     ],
-    status: 'running',
-    quickTest: {
-      listFiles: `http://${req.get('host')}/api/files-debug`,
-      testFile: `http://${req.get('host')}/api/files-test/dashboard-iot-caliper-1.png`
-    }
+    status: 'running'
   });
 });
 
 // CORS preflight
 app.options('*', cors());
 
-// ==================== ERROR HANDLERS ====================
-
 // 404 handler
 app.use((req, res) => {
   console.log('❌ 404 Not Found:', req.method, req.path);
-  
-  // Special handling for file requests
-  if (req.path.startsWith('/api/files/')) {
-    const filename = path.basename(req.path);
-    return res.status(404).json({
-      error: 'File Not Found',
-      path: req.path,
-      filename: filename,
-      message: `File "${filename}" does not exist`,
-      filesDirectory: filesPath,
-      debugUrl: '/api/files-debug',
-      testUrl: `/api/files-test/${filename}`
-    });
-  }
-  
   res.status(404).json({ 
     error: 'Not Found',
     path: req.path,
@@ -378,8 +220,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ==================== START SERVER ====================
-
+// Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('='.repeat(70));
@@ -397,27 +238,13 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🤖 OpenAI API:        ${process.env.OPENAI_API_KEY ? 'Configured ✓' : 'Not configured ⚠️'}`);
   console.log(`📊 Smartsheet API:    ${process.env.SMARTSHEET_API_KEY ? 'Configured ✓' : 'Not configured ⚠️'}`);
   console.log(`📋 Sheet ID:          ${process.env.SMARTSHEET_PRIMARY_SHEET_ID || 'Not set'}`);
-  console.log('');
-  console.log(`📁 Files Configuration:`);
-  console.log(`   Directory:         ${filesPath}`);
-  console.log(`   Base URL:          /api/files/*`);
-  console.log(`   CORS:              Enabled (*)`)
-  console.log(`   Content-Type:      Auto-detected`);
-  console.log(`   Cache:             1 hour`);
-  console.log('');
-  console.log(`🔧 Debug Endpoints:`);
-  console.log(`   List Files:        http://localhost:${PORT}/api/files-debug`);
-  console.log(`   Test File:         http://localhost:${PORT}/api/files-test/{filename}`);
+  console.log(`📁 Files Directory:   ${filesPath}`);
   console.log('');
   console.log(`🌐 CORS Allowed Origins: ${allowedOrigins.length}`);
   allowedOrigins.forEach(origin => console.log(`   - ${origin}`));
   console.log('');
   console.log(`⏱️  Started at:        ${new Date().toISOString()}`);
   console.log('='.repeat(70));
-  console.log('');
-  console.log('📝 Quick Test Commands:');
-  console.log(`   curl http://localhost:${PORT}/api/files-debug`);
-  console.log(`   curl -I http://localhost:${PORT}/api/files/dashboard-iot-caliper-1.png`);
   console.log('');
   
   if (!process.env.SMARTSHEET_API_KEY) {

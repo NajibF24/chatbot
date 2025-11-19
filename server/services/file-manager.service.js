@@ -1,0 +1,300 @@
+// server/services/file-manager.service.js - FIXED: Correct File Path
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+class FileManagerService {
+  constructor() {
+    this.filesDir = path.join(__dirname, '..', 'data', 'files');
+    
+    // Supported file types
+    this.supportedTypes = {
+      images: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'],
+      documents: ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'],
+      all: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+    };
+  }
+
+  async ensureFilesDir() {
+    try {
+      await fs.mkdir(this.filesDir, { recursive: true });
+    } catch (error) {
+      console.error('Error creating files directory:', error);
+    }
+  }
+
+  /**
+   * List all files in the directory (always fresh scan)
+   */
+  async listFiles() {
+    try {
+      await this.ensureFilesDir();
+      const files = await fs.readdir(this.filesDir);
+      
+      const fileList = [];
+      
+      for (const file of files) {
+        const filePath = path.join(this.filesDir, file);
+        const stats = await fs.stat(filePath);
+        
+        if (stats.isFile()) {
+          const ext = path.extname(file).toLowerCase();
+          
+          if (this.supportedTypes.all.includes(ext)) {
+            // ✅ FIXED: Ensure path is clean and properly formatted
+            const relativePath = `/api/files/${file}`;
+            
+            fileList.push({
+              name: file,
+              path: filePath,
+              relativePath: relativePath,  // ✅ Clean path without extra characters
+              extension: ext,
+              type: this.getFileType(ext),
+              size: stats.size,
+              sizeKB: (stats.size / 1024).toFixed(2),
+              sizeMB: (stats.size / (1024 * 1024)).toFixed(2),
+              modifiedAt: stats.mtime,
+              createdAt: stats.birthtime
+            });
+            
+            console.log(`📁 File indexed: ${file} → ${relativePath}`);
+          }
+        }
+      }
+      
+      return fileList;
+    } catch (error) {
+      console.error('Error listing files:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get file type category
+   */
+  getFileType(ext) {
+    if (this.supportedTypes.images.includes(ext)) {
+      return 'image';
+    } else if (ext === '.pdf') {
+      return 'pdf';
+    } else {
+      return 'document';
+    }
+  }
+
+  /**
+   * ✅ IMPROVED: Search files - Return ALL matches, not just first one
+   */
+  async searchFiles(query) {
+    const files = await this.listFiles();
+    const lowerQuery = query.toLowerCase();
+    
+    // Extract important keywords (remove noise words)
+    const keywords = lowerQuery
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+      .filter(w => !['the', 'and', 'atau', 'dan', 'file', 'gambar'].includes(w));
+    
+    console.log(`🔍 Searching for: "${query}"`);
+    console.log(`   Keywords: [${keywords.join(', ')}]`);
+    
+    // Score-based matching
+    const scored = files.map(f => {
+      const fileName = f.name.toLowerCase();
+      let score = 0;
+      
+      // Exact match = highest score
+      if (fileName === lowerQuery) score += 100;
+      
+      // Contains exact query
+      if (fileName.includes(lowerQuery)) score += 50;
+      
+      // Keyword matches
+      keywords.forEach(keyword => {
+        if (fileName.includes(keyword)) score += 20;
+      });
+      
+      // Partial matches
+      const fileWords = fileName.split(/[-_.\s]+/);
+      keywords.forEach(keyword => {
+        fileWords.forEach(word => {
+          if (word.includes(keyword) || keyword.includes(word)) {
+            score += 10;
+          }
+        });
+      });
+      
+      if (score > 0) {
+        console.log(`   ${fileName}: score ${score}`);
+      }
+      
+      return { file: f, score };
+    });
+    
+    // Return all files with score > 0, sorted by score
+    const results = scored
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(s => s.file);
+    
+    console.log(`   Found: ${results.length} file(s)`);
+    
+    return results;
+  }
+
+  /**
+   * Get file by exact name
+   */
+  async getFileByName(fileName) {
+    const files = await this.listFiles();
+    return files.find(f => f.name === fileName);
+  }
+
+  /**
+   * Check if message is requesting a file
+   */
+  isFileRequest(message) {
+    const lowerMsg = message.toLowerCase();
+    const keywords = [
+      'tampilkan',
+      'show',
+      'lihat',
+      'buka',
+      'open',
+      'view',
+      'dashboard',
+      'gambar',
+      'image',
+      'foto',
+      'picture',
+      'file',
+      'dokumen',
+      'document',
+      'pdf',
+      'cari',
+      'search',
+      'ada',
+      'punya'
+    ];
+    
+    return keywords.some(keyword => lowerMsg.includes(keyword));
+  }
+
+  /**
+   * Extract file name/keywords from message
+   */
+  extractFileQuery(message) {
+    // Remove common words
+    const stopWords = ['tampilkan', 'show', 'lihat', 'buka', 'open', 'view', 
+                       'gambar', 'image', 'foto', 'picture', 'file', 
+                       'dokumen', 'document', 'saya', 'my', 'dashboard',
+                       'ada', 'punya', 'cari', 'untuk', 'dari', 'yang'];
+    
+    let query = message.toLowerCase();
+    
+    stopWords.forEach(word => {
+      query = query.replace(new RegExp(`\\b${word}\\b`, 'gi'), ' ');
+    });
+    
+    // Clean up
+    query = query.trim().replace(/\s+/g, ' ');
+    
+    return query;
+  }
+
+  /**
+   * Generate AI context for available files
+   */
+  async generateFileContext() {
+    const files = await this.listFiles();
+    
+    if (files.length === 0) {
+      return 'Tidak ada file yang tersedia saat ini.';
+    }
+    
+    let context = '**FILE YANG TERSEDIA:**\n\n';
+    
+    // Group by type
+    const byType = {
+      image: files.filter(f => f.type === 'image'),
+      pdf: files.filter(f => f.type === 'pdf'),
+      document: files.filter(f => f.type === 'document')
+    };
+    
+    if (byType.image.length > 0) {
+      context += 'GAMBAR/IMAGE:\n';
+      byType.image.forEach((f, idx) => {
+        context += `${idx + 1}. ${f.name} (${f.sizeKB} KB)\n`;
+      });
+      context += '\n';
+    }
+    
+    if (byType.pdf.length > 0) {
+      context += 'PDF DOCUMENTS:\n';
+      byType.pdf.forEach((f, idx) => {
+        context += `${idx + 1}. ${f.name} (${f.sizeKB} KB)\n`;
+      });
+      context += '\n';
+    }
+    
+    if (byType.document.length > 0) {
+      context += 'DOCUMENTS:\n';
+      byType.document.forEach((f, idx) => {
+        context += `${idx + 1}. ${f.name} (${f.sizeKB} KB)\n`;
+      });
+      context += '\n';
+    }
+    
+    return context;
+  }
+
+  /**
+   * ✅ IMPROVED: Format file info - Multiple files support
+   */
+  formatFileInfo(files) {
+    // Handle single file
+    if (!Array.isArray(files)) {
+      files = [files];
+    }
+    
+    if (files.length === 0) {
+      return 'Tidak ada file yang ditemukan.';
+    }
+    
+    let text = '';
+    
+    if (files.length === 1) {
+      const file = files[0];
+      text += `Menampilkan file: ${file.name}\n\n`;
+      text += `INFORMASI:\n`;
+      text += `• Tipe: ${file.type.toUpperCase()}\n`;
+      text += `• Ukuran: ${file.sizeKB} KB\n`;
+      text += `• Terakhir Diubah: ${new Date(file.modifiedAt).toLocaleString('id-ID')}\n\n`;
+      
+      if (file.type === 'image') {
+        text += 'Gambar ditampilkan di atas.';
+      } else if (file.type === 'pdf') {
+        text += 'Dokumen PDF ditampilkan di atas.';
+      } else {
+        text += 'File tersedia untuk di-download.';
+      }
+    } else {
+      // Multiple files
+      text += `Ditemukan ${files.length} file:\n\n`;
+      
+      files.forEach((file, idx) => {
+        text += `${idx + 1}. ${file.name}\n`;
+        text += `   Tipe: ${file.type.toUpperCase()} • Ukuran: ${file.sizeKB} KB\n`;
+      });
+      
+      text += `\nSemua file ditampilkan di atas.`;
+    }
+    
+    return text;
+  }
+}
+
+export default FileManagerService;
