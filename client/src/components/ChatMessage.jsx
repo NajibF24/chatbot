@@ -1,4 +1,3 @@
-// client/src/components/ChatMessage.jsx - FIXED: Proper URL handling
 import React, { useState } from 'react';
 
 function ChatMessage({ message }) {
@@ -6,12 +5,12 @@ function ChatMessage({ message }) {
   const [imageError, setImageError] = useState(false);
   const isUser = message.role === 'user';
 
-  // ✅ FIXED: Simple relative URL (nginx will proxy)
+  // ✅ Simple relative URL (nginx will proxy)
   const getFileUrl = (relativePath) => {
-    // Just use the path as-is (already correct from backend)
     console.log(`📎 Loading file: ${relativePath}`);
-    return relativePath; 
+    return relativePath;
   };
+
   // ✅ Check if message has attached files
   const hasAttachedFiles = message.attachedFiles && message.attachedFiles.length > 0;
 
@@ -137,38 +136,47 @@ function ChatMessage({ message }) {
     return parts.length > 0 ? parts : text;
   };
 
-  // ✅ Render attached file - Direct display with error handling
-  const renderAttachedFile = (file, index) => {
-    console.log(`📎 Rendering file [${index}]:`, file);
+  // ✅ NEW: Render attached file with grid layout support
+  const renderAttachedFile = (file, index, totalFiles) => {
+    console.log(`📎 Rendering file [${index}/${totalFiles}]:`, file);
     const fileUrl = getFileUrl(file.path);
-    
+
     if (file.type === 'image') {
+      // ✅ Determine grid class based on total files
+      let gridClass = 'w-full'; // Single image = full width
+
+      if (totalFiles === 2) {
+        gridClass = 'w-full md:w-[calc(50%-0.5rem)]'; // 2 images = 50% each
+      } else if (totalFiles >= 3) {
+        gridClass = 'w-full md:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)]'; // 3+ images = responsive grid
+      }
+
       return (
-        <div key={index} className="mb-4 w-full">
+        <div key={index} className={`${gridClass}`}>
           {/* Image Header */}
           <div className="bg-primary-50 px-3 py-2 rounded-t-lg border border-primary-200">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <svg className="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="flex items-center space-x-2 min-w-0">
+                <svg className="w-4 h-4 text-primary-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
-                <span className="font-semibold text-steel-800 text-sm">{file.name}</span>
+                <span className="font-semibold text-steel-800 text-sm truncate">{file.name}</span>
               </div>
-              <span className="text-xs text-steel-600">{file.size} KB</span>
+              <span className="text-xs text-steel-600 flex-shrink-0 ml-2">{file.size} KB</span>
             </div>
           </div>
 
           {/* Image Display */}
           {!imageError ? (
-            <div 
+            <div
               className="relative cursor-pointer group bg-steel-50 border-x border-b border-steel-200 rounded-b-lg overflow-hidden"
               onClick={() => setImageExpanded(!imageExpanded)}
             >
-              <img 
+              <img
                 src={fileUrl}
                 alt={file.name}
                 className={`w-full transition-all duration-300 ${
-                  imageExpanded ? 'max-h-none' : 'max-h-[600px] object-contain'
+                  imageExpanded ? 'max-h-none' : 'h-64 object-cover'
                 }`}
                 onError={(e) => {
                   console.error(`❌ Image load error: ${fileUrl}`);
@@ -180,10 +188,10 @@ function ChatMessage({ message }) {
                   console.log(`✅ Image loaded: ${fileUrl}`);
                 }}
               />
-              
+
               {/* Expand hint */}
               {!imageExpanded && (
-                <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded">
+                <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                   Klik untuk memperbesar
                 </div>
               )}
@@ -194,12 +202,12 @@ function ChatMessage({ message }) {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <div>
+                <div className="min-w-0">
                   <div className="font-semibold">Gagal memuat gambar</div>
-                  <div className="text-sm">Path: {fileUrl}</div>
-                  <a 
-                    href={fileUrl} 
-                    target="_blank" 
+                  <div className="text-sm truncate">Path: {fileUrl}</div>
+                  <a
+                    href={fileUrl}
+                    target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-primary-600 hover:underline"
                   >
@@ -213,7 +221,7 @@ function ChatMessage({ message }) {
       );
     } else if (file.type === 'pdf') {
       return (
-        <div key={index} className="mb-4 w-full">
+        <div key={index} className="w-full mb-4">
           {/* PDF Header */}
           <div className="bg-red-50 px-3 py-2 rounded-t-lg border border-red-200">
             <div className="flex items-center justify-between">
@@ -241,7 +249,7 @@ function ChatMessage({ message }) {
     } else {
       // Other document types
       return (
-        <div key={index} className="mb-4 w-full">
+        <div key={index} className="w-full mb-4">
           <div className="bg-steel-100 rounded-lg border border-steel-200 overflow-hidden">
             <div className="px-4 py-3 flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -255,8 +263,8 @@ function ChatMessage({ message }) {
                   <div className="text-xs text-steel-600">{file.extension.toUpperCase()} • {file.size} KB</div>
                 </div>
               </div>
-              <a 
-                href={fileUrl} 
+              <a
+                href={fileUrl}
                 download={file.name}
                 className="text-primary-600 hover:text-primary-700 text-sm font-medium"
               >
@@ -291,14 +299,16 @@ function ChatMessage({ message }) {
 
         {/* Message Content */}
         <div className={`flex flex-col flex-1 ${isUser ? 'items-end' : 'items-start'}`}>
-          {/* ✅ Attached Files - Display ALL files directly */}
+          {/* ✅ NEW: Attached Files with Grid Layout */}
           {hasAttachedFiles && !isUser && (
             <div className="w-full mb-3">
-              {console.log(`📎 Rendering ${message.attachedFiles.length} file(s)`)}
-              {message.attachedFiles.map((file, idx) => {
-                console.log(`   File ${idx}:`, file);
-                return renderAttachedFile(file, idx);
-              })}
+              <div className="flex flex-wrap gap-4">
+                {console.log(`📎 Rendering ${message.attachedFiles.length} file(s) in grid layout`)}
+                {message.attachedFiles.map((file, idx) => {
+                  console.log(`   File ${idx + 1}:`, file);
+                  return renderAttachedFile(file, idx, message.attachedFiles.length);
+                })}
+              </div>
             </div>
           )}
 
