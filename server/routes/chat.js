@@ -1,0 +1,387 @@
+import express from 'express';
+import OpenAI from 'openai';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+// Library pembaca dokumen
+import pdf from 'pdf-parse';
+import mammoth from 'mammoth';
+
+import User from '../models/User.js';
+import Bot from '../models/Bot.js';
+import Chat from '../models/Chat.js';
+import { requireAuth } from '../middleware/auth.js';
+import SmartsheetJSONService from '../services/smartsheet-json.service.js';
+import FileManagerService from '../services/file-manager.service.js';
+import { getBotConfig } from '../config/bot_prompts.js';
+
+const router = express.Router();
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const fileManager = new FileManagerService();
+
+// ============================================================================
+// 📂 1. CONFIG UPLOAD
+// ============================================================================
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = 'data/files';
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // Limit 10MB
+});
+
+// ============================================================================
+// 🧠 2. HELPER FUNCTIONS
+// ============================================================================
+function isDataQuery(message) {
+  const lowerMsg = (message || '').toLowerCase();
+  // Keyword Visual (Skip data fetch jika user minta gambar dashboard)
+  const visualKeywords = ['dashboard', 'gambar', 'image', 'foto', 'screenshot'];
+  if (visualKeywords.some(k => lowerMsg.includes(k))) return false;
+
+  // Keyword Data
+  const dataKeywords = ['berikan', 'tampilkan', 'cari', 'list', 'daftar', 'semua', 'project', 'status', 'progress', 'overdue', 'summary', 'health', 'analisa', 'resume'];
+  return dataKeywords.some(k => lowerMsg.includes(k));
+}
+
+async function getSmartsheetData(bot, forceRefresh = false) {
+  const apiKey = bot.smartsheetConfig?.customApiKey || process.env.SMARTSHEET_API_KEY;
+  const sheetId = bot.smartsheetConfig?.primarySheetId || process.env.SMARTSHEET_PRIMARY_SHEET_ID;
+
+  if (!apiKey || !sheetId) return null;
+
+  try {
+    const service = new SmartsheetJSONService();
+    service.apiKey = apiKey;
+    return await service.getData(sheetId, forceRefresh);
+  } catch (error) {
+    console.error('❌ Error getting Smartsheet data:', error.message);
+    return null;
+  }
+}
+
+// ============================================================================
+// 🚀 3. ROUTES
+// ============================================================================
+
+// Upload Endpoint
+router.post('/upload', requireAuth, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  
+  res.json({
+    filename: req.file.filename,
+    originalname: req.file.originalname,
+    path: req.file.path,
+    mimetype: req.file.mimetype,
+    url: `/api/files/${req.file.filename}`, // URL untuk Frontend
+    size: req.file.size
+  });
+});
+
+// Get Bots
+router.get('/bots', requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.session.userId).populate('assignedBots');
+    if (user.isAdmin && (!user.assignedBots || user.assignedBots.length === 0)) {
+      const allBots = await Bot.find({});
+      return res.json(allBots);
+    }
+    res.json(user.assignedBots);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ============================================================================
+// 💬 4. MAIN CHAT LOGIC (THE BRAIN)
+// ============================================================================
+router.post('/message', requireAuth, async (req, res) => {
+  try {
+    const { message, botId, history, attachedFile } = req.body;
+    const user = await User.findById(req.session.userId);
+    const bot = await Bot.findById(botId);
+
+    if (!bot) return res.status(404).json({ error: 'Bot not found' });
+    if (!user.assignedBots.some(b => b.toString() === botId) && !user.isAdmin) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // --- STEP A: PERSIAPKAN PESAN USER ---
+    let userContent = [];
+    
+    // 1. Masukkan Teks (Jika ada)
+    if (message) {
+      userContent.push({ type: "text", text: message });
+    }
+
+    // 2. Masukkan File Attachment (Logic Ekstraksi)
+    if (attachedFile && attachedFile.path) {
+      const mime = attachedFile.mimetype || '';
+      console.log(`📎 Processing file: ${attachedFile.filename || attachedFile.originalname} (${mime})`);
+
+      try {
+        // A. IMAGE (Vision API)
+        if (mime.startsWith('image/')) {
+          const imgBuffer = fs.readFileSync(attachedFile.path);
+          userContent.push({
+            type: "image_url",
+            image_url: { url: `data:${mime};base64,${imgBuffer.toString('base64')}` }
+          });
+        }
+        
+        // B. PDF (Extract Text)
+        else if (mime === 'application/pdf') {
+          const dataBuffer = fs.readFileSync(attachedFile.path);
+          const data = await pdf(dataBuffer);
+          // Ambil 30k karakter pertama saja agar token tidak jebol
+          const text = data.text.replace(/\n\s*\n/g, '\n').substring(0, 30000); 
+          userContent.push({ 
+            type: "text", 
+            text: `\n\n[FILE PDF START: ${attachedFile.filename || attachedFile.originalname}]\n${text}\n[FILE PDF END]\n` 
+          });
+        }
+
+        // C. WORD / DOCX (Extract Text)
+        else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          const result = await mammoth.extractRawText({ path: attachedFile.path });
+          const text = result.value.substring(0, 30000);
+          userContent.push({ 
+            type: "text", 
+            text: `\n\n[FILE DOCX START: ${attachedFile.filename || attachedFile.originalname}]\n${text}\n[FILE DOCX END]\n` 
+          });
+        }
+
+        // D. PLAIN TEXT / CODE
+        else if (mime.match(/(text|json|javascript|xml)/) || (attachedFile.filename || attachedFile.originalname).match(/\.(txt|md|csv|js|json|env|sh)$/)) {
+          const content = fs.readFileSync(attachedFile.path, 'utf8').substring(0, 20000);
+          userContent.push({ 
+            type: "text", 
+            text: `\n\n[FILE CONTENT: ${attachedFile.filename || attachedFile.originalname}]\n${content}\n` 
+          });
+        }
+
+      } catch (err) {
+        console.error("❌ Error reading file content:", err);
+        userContent.push({ 
+          type: "text", 
+          text: `\n[SYSTEM ERROR: Gagal membaca isi file ${attachedFile.filename || attachedFile.originalname}]` 
+        });
+      }
+    }
+
+    // --- STEP B: LOGIC SMARTSHEET / BOT KHUSUS ---
+    const botConfig = getBotConfig(bot.name);
+    const isSmartsheetBot = bot.smartsheetEnabled || (botConfig && bot.name.toLowerCase().includes('smartsheet'));
+    
+    let systemPrompt = "";
+    let contextData = null;
+
+    if (isSmartsheetBot) {
+        // 1. Cek Request Dashboard (Akses Folder Server)
+        const isFileReq = fileManager.isFileRequest(message || '');
+        if (isFileReq) {
+            const query = fileManager.extractFileQuery(message || '');
+            const foundFiles = await fileManager.searchFiles(query);
+            
+            if (foundFiles.length > 0) {
+                const reply = fileManager.generateSmartDescription(foundFiles, query);
+                // Siapkan attachment untuk disimpan ke DB & dikirim ke Frontend
+                const attachments = foundFiles.map(f => ({ 
+                    name: f.name, 
+                    path: f.relativePath, // URL Frontend
+                    type: f.type, 
+                    size: f.sizeKB 
+                }));
+                
+                // Simpan & Return Langsung (Hemat Token OpenAI)
+                const chat = new Chat({ 
+                    userId: user._id, 
+                    botId: bot._id, 
+                    role: 'assistant', 
+                    content: reply, 
+                    attachedFiles: attachments 
+                });
+                await chat.save();
+                return res.json({ response: reply, attachedFiles: attachments });
+            }
+        }
+
+        // 2. Cek Request Data (Smartsheet API)
+        // Kita fetch data jika user minta data ATAU user melampirkan file (siapa tau minta analisa file vs data proyek)
+        const isData = isDataQuery(message || '');
+        if (isData || (attachedFile && !attachedFile.mimetype.startsWith('image/'))) {
+            const shouldRefresh = (message || '').toLowerCase().includes('refresh');
+            const sheetData = await getSmartsheetData(bot, shouldRefresh);
+
+            if (sheetData) {
+                const service = new SmartsheetJSONService();
+                const rawContext = service.formatForAI(sheetData);
+                contextData = `Total Proyek: ${sheetData.projects.length}\n${rawContext}`;
+            }
+        }
+    }
+
+    // --- STEP C: GENERATE SYSTEM PROMPT ---
+    if (botConfig) {
+      // Ambil prompt dari bot_prompts.js (Logic Tabel & Overdue ada disana)
+      systemPrompt = botConfig.getPrompt(bot.name, contextData);
+    } else {
+      systemPrompt = `Anda adalah ${bot.name}. Asisten AI General. Jawablah dengan format yang rapi (Markdown).`;
+    }
+
+    // --- STEP D: OPENAI CALL ---
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...(history || []).map(msg => ({ 
+        role: msg.role === 'user' ? 'user' : 'assistant', 
+        content: msg.content 
+      })),
+      { role: 'user', content: userContent } // Pesan + File
+    ];
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: messages,
+      temperature: 0.5,
+      max_tokens: 4096
+    });
+
+    const aiResponse = completion.choices[0].message.content;
+
+    // --- STEP E: SAVE TO DB (✅ FIXED VERSION) ---
+    
+    // ✅ 1. Siapkan attachedFiles array dengan benar
+    let userAttachedFiles = [];
+    if (attachedFile) {
+      // Pastikan kita punya semua field yang diperlukan
+      const fileName = attachedFile.filename || attachedFile.originalname || 'unknown';
+      const fileUrl = attachedFile.url || `/api/files/${fileName}`;
+      const fileMime = attachedFile.mimetype || 'application/octet-stream';
+      const fileSize = attachedFile.size || 0;
+      
+      // Tentukan tipe file
+      let fileType = 'other';
+      if (fileMime.startsWith('image/')) {
+        fileType = 'image';
+      } else if (fileMime === 'application/pdf') {
+        fileType = 'pdf';
+      } else if (fileMime.includes('word') || fileMime.includes('document')) {
+        fileType = 'document';
+      }
+      
+      // ✅ Buat object yang sesuai dengan schema
+      userAttachedFiles = [{
+        name: fileName,
+        path: fileUrl,
+        type: fileType,
+        size: (fileSize / 1024).toFixed(1) // Convert to KB string
+      }];
+      
+      // 🔍 DEBUG: Cek tipe data
+      console.log('📦 Prepared attachedFiles:', JSON.stringify(userAttachedFiles, null, 2));
+      console.log('📦 Type check:', {
+        isArray: Array.isArray(userAttachedFiles),
+        length: userAttachedFiles.length,
+        firstElementType: typeof userAttachedFiles[0],
+        firstElement: userAttachedFiles[0]
+      });
+    }
+    
+    // ✅ 2. Simpan Chat User dengan struktur yang benar
+    const userChatData = { 
+      userId: user._id, 
+      botId: bot._id, 
+      role: 'user', 
+      content: message || '', // Kosongkan jika tidak ada pesan teks
+      
+      // Legacy field (optional, bisa dihapus jika tidak digunakan)
+      attachment: attachedFile ? { 
+        filename: attachedFile.filename || attachedFile.originalname,
+        url: attachedFile.url || `/api/files/${attachedFile.filename || attachedFile.originalname}`,
+        mimetype: attachedFile.mimetype
+      } : undefined
+    };
+
+    // ✅ CRITICAL: Set attachedFiles AFTER object creation to prevent transformation
+    if (userAttachedFiles.length > 0) {
+      userChatData.attachedFiles = userAttachedFiles;
+    }
+
+    console.log('💾 About to save:', {
+      userId: userChatData.userId,
+      botId: userChatData.botId,
+      role: userChatData.role,
+      hasAttachment: !!userChatData.attachment,
+      attachedFilesType: typeof userChatData.attachedFiles,
+      attachedFilesIsArray: Array.isArray(userChatData.attachedFiles),
+      attachedFilesContent: userChatData.attachedFiles
+    });
+    
+    const userChat = new Chat(userChatData);
+    
+    // 🔍 DEBUG: Check what Mongoose actually stored
+    console.log('🔍 After new Chat():', {
+      attachedFilesType: typeof userChat.attachedFiles,
+      attachedFilesIsArray: Array.isArray(userChat.attachedFiles),
+      attachedFilesValue: userChat.attachedFiles
+    });
+    
+    await userChat.save();
+    console.log('✅ User chat saved successfully');
+
+    // ✅ 3. Simpan Chat Bot
+    const botChat = new Chat({ 
+      userId: user._id, 
+      botId: bot._id, 
+      role: 'assistant', 
+      content: aiResponse,
+      attachedFiles: [] // Bot biasanya tidak punya attachment
+    });
+    await botChat.save();
+    console.log('✅ Bot chat saved successfully');
+
+    // ✅ 4. Return response dengan attachedFiles jika ada
+    res.json({ 
+      response: aiResponse,
+      attachedFiles: userAttachedFiles.length > 0 ? userAttachedFiles : undefined
+    });
+
+  } catch (error) {
+    console.error('❌ Chat Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- HISTORY ROUTES ---
+router.get('/history/:botId', requireAuth, async (req, res) => {
+  try {
+    const chats = await Chat.find({ 
+      userId: req.session.userId, 
+      botId: req.params.botId 
+    }).sort({ createdAt: 1 });
+    res.json(chats);
+  } catch (error) { 
+    res.status(500).json({ error: error.message }); 
+  }
+});
+
+router.delete('/history/:botId', requireAuth, async (req, res) => {
+  try {
+    await Chat.deleteMany({ 
+      userId: req.session.userId, 
+      botId: req.params.botId 
+    });
+    res.json({ message: 'History cleared' });
+  } catch (error) { 
+    res.status(500).json({ error: error.message }); 
+  }
+});
+
+export default router;
