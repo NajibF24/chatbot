@@ -41,10 +41,10 @@ deploy_production:
     - echo "$DOT_ENV_FILE" > .env
     
     # 2. Persiapkan Folder Data (Agar tidak error permission)
-    - mkdir -p data/mongodb
-    - mkdir -p server/data
-    - chmod -R 777 data/mongodb
-    - chmod -R 777 server/data
+    - mkdir -p /home/admingys/internal-chat-picture/data/mongodb
+    - mkdir -p /home/admingys/internal-chat-picture/server/data
+    - chmod -R 777 /home/admingys/internal-chat-picture/data
+    - chmod -R 777 /home/admingys/internal-chat-picture/server/data
 
     # 3. [PENTING] Hapus Paksa Container Lama
     # Ini solusi untuk error "Conflict container name" yang Anda alami.

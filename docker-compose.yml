@@ -10,7 +10,7 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-admin123}
     # ✅ CRITICAL: MongoDB data persistence
     volumes:
-      - ./data/mongodb:/data/db  # Mount to host directory
+      - /home/admingys/internal-chat-picture/data/mongodb:/data/db  # Mount to host directory
     networks:
       - internal-chat-network
     deploy:
@@ -60,7 +60,7 @@ services:
     # ✅ CRITICAL: Persistent file storage
     volumes:
       # Mount data folder to host (uploaded files + dashboard images)
-      - ./server/data:/usr/src/app/data
+      - /home/admingys/internal-chat-picture/server/data:/usr/src/app/data
     depends_on:
       mongo:
         condition: service_healthy
