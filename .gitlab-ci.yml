@@ -1,9 +1,15 @@
+# --- KONFIGURASI FOLDER BARU ---
+variables:
+  # Ini akan memaksa runner bekerja di folder baru
+  # Folder lama yang error akan ditinggalkan
+  GIT_CLONE_PATH: '$CI_BUILDS_DIR/$CI_CONCURRENT_ID/project-baru-bersih'
+  GIT_CLEAN_FLAGS: -ffdx -e data/
+
 stages:
   - build
   - deploy
 
 # --- JOB 1: BUILD IMAGE ---
-# Memastikan kodingan tidak error sebelum dideploy
 build_images:
   stage: build
   tags:
@@ -11,10 +17,8 @@ build_images:
   only:
     - main
   script:
-    - echo "🏗️ Memulai Build..."
-    # Restore file .env dari GitLab Variable
+    - echo "🏗️ Memulai Build di folder baru..."
     - echo "$DOT_ENV_FILE" > .env
-    # Build image (hasil build akan tersimpan di cache server)
     - docker compose build
     - echo "✅ Build Selesai."
 
@@ -25,14 +29,7 @@ deploy_production:
     - portal-ai
   only:
     - main
-  # Hanya jalan kalau build sukses
   needs: ["build_images"]
-  
-  variables:
-    # [SANGAT PENTING]
-    # Mencegah Runner menghapus folder 'data/' saat persiapan (git clean)
-    # Ini solusi ampuh untuk menghindari error "Permission denied" saat clean up.
-    GIT_CLEAN_FLAGS: -ffdx -e data/
   
   script:
     - echo "🚀 Memulai Deployment..."
@@ -40,23 +37,16 @@ deploy_production:
     # 1. Restore .env
     - echo "$DOT_ENV_FILE" > .env
     
-    # 2. Hapus container lama secara paksa (Safety Net)
-    # Supaya tidak ada error "Conflict container name"
+    # 2. Hapus container lama
     - docker rm -f mongo internal-chat-server internal-chat-client || true
-    
-    # 3. Turunkan service yang sedang jalan
     - docker compose down --remove-orphans || true
     
-    # 4. Jalankan Aplikasi
-    # Karena path di docker-compose.yml sudah Absolute (/home/admingys/...),
-    # Docker akan otomatis mount ke folder yang benar.
+    # 3. Jalankan Aplikasi
+    # (Menggunakan data di folder /home/admingys/... yang sudah kita fix sebelumnya)
     - docker compose up -d 
     
-    # 5. Cek Kesehatan Container (Opsional)
+    # 4. Cek Kesehatan
     - sleep 10
     - docker compose ps
-
-    # 6. Bersihkan image bekas update
     - docker image prune -f
-    
-    - echo "✅ Deployment Sukses! Aplikasi sudah update."
+    - echo "✅ Deployment Sukses!"
