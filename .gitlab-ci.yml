@@ -15,6 +15,7 @@ stages:
 
 # --- JOB 1: SECURITY SCAN (TRIVY + HTML REPORT) ---
 # Ini ringan, aman dijalankan di server 4GB
+# --- JOB 1: SECURITY SCAN (TERPISAH SERVER & CLIENT) ---
 security_scan:
   stage: security
   tags:
@@ -23,22 +24,29 @@ security_scan:
   script:
     - echo "🛡️ Memulai Security Scanning..."
     
-    # 1. Download Template HTML Report
+    # 1. Download Template HTML
     - wget https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl -O trivy-report.tpl
     
-    # 2. Scan & Generate HTML Report (Disimpan jadi file)
-    #- trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --format template --template "@trivy-report.tpl" -o trivy-report.html .
-    - trivy fs --scanners vuln,secret,misconfig --format template --template "@trivy-report.tpl" -o trivy-report.html .    
-    # 3. Tampilkan ringkasan di layar terminal juga
-    #- trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL .
-    - trivy fs --scanners vuln,secret,misconfig .
+    # 2. SCAN SERVER (Simpan sebagai report-server.html)
+    - echo "🔍 Scanning Server..."
+    - trivy fs --scanners vuln,secret,misconfig --format template --template "@trivy-report.tpl" -o report-server.html ./server
+    
+    # 3. SCAN CLIENT (Simpan sebagai report-client.html)
+    - echo "🔍 Scanning Client..."
+    - trivy fs --scanners vuln,secret,misconfig --format template --template "@trivy-report.tpl" -o report-client.html ./client
+    
+    # 4. Tampilkan Ringkasan di Terminal (Opsional, biar log pipeline ada isinya)
+    - trivy fs --scanners vuln,secret,misconfig ./server
+    - trivy fs --scanners vuln,secret,misconfig ./client
+
+  # Simpan KEDUA file laporan
   artifacts:
-    name: "Trivy-Security-Report-$CI_COMMIT_SHORT_SHA"
+    name: "Security-Reports-$CI_COMMIT_SHORT_SHA"
     paths:
-      - trivy-report.html
+      - report-server.html
+      - report-client.html
     expire_in: 7 days
     when: always
-
 # --- JOB 2: BUILD & PUSH TO REGISTRY ---
 # Image dibangun lalu dikirim ke GitLab Server (git.gyssteel.com)
 # Jadi server on-premise ini tidak perlu menyimpan cache build yang besar
