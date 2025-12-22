@@ -119,7 +119,7 @@ dast_scan:
   allow_failure: true # Jangan gagalkan pipeline kalau ada warning, cukup lapor saja
   variables:
     # URL website yang sudah running (Ganti dengan IP atau Domain Anda)
-    TARGET_URL: "http://172.17.0.1:80" 
+    TARGET_URL: "https://portalai.gyssteel.com" 
     # Catatan: Karena dijalankan dari dalam Container Docker, 
     # kita pakai IP Gateway Docker (172.17.0.1) untuk nembak ke Host/Server Asli.
     # Atau kalau punya domain publik (portal-ai.com), pakai domain itu lebih bagus.
