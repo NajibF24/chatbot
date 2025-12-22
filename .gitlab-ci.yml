@@ -27,11 +27,11 @@ security_scan:
     - wget https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl -O trivy-report.tpl
     
     # 2. Scan & Generate HTML Report (Disimpan jadi file)
-    - trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --format template --template "@trivy-report.tpl" -o trivy-report.html .
-    
+    #- trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --format template --template "@trivy-report.tpl" -o trivy-report.html .
+    - trivy fs --scanners vuln,secret,misconfig --format template --template "@trivy-report.tpl" -o trivy-report.html .    
     # 3. Tampilkan ringkasan di layar terminal juga
-    - trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL .
-    
+    #- trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL .
+    - trivy fs --scanners vuln,secret,misconfig .
   artifacts:
     name: "Trivy-Security-Report-$CI_COMMIT_SHORT_SHA"
     paths:
