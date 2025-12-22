@@ -1,15 +1,34 @@
-# --- KONFIGURASI FOLDER BARU ---
+# --- KONFIGURASI GLOBAL (JANGAN DIHAPUS) ---
 variables:
-  # Ini akan memaksa runner bekerja di folder baru
-  # Folder lama yang error akan ditinggalkan
+  # Ini memaksa runner bekerja di folder "project-baru-bersih"
+  # Wajib ada karena kita sudah aktifkan custom_build_dir di server
   GIT_CLONE_PATH: '$CI_BUILDS_DIR/$CI_CONCURRENT_ID/project-baru-bersih'
+  
+  # Mencegah runner menghapus folder data lokal saat persiapan
   GIT_CLEAN_FLAGS: -ffdx -e data/
 
 stages:
+  - security  # <--- Stage Baru
   - build
   - deploy
 
-# --- JOB 1: BUILD IMAGE ---
+# --- JOB 1: SECURITY SCAN (DEVSECOPS) ---
+security_scan:
+  stage: security
+  tags:
+    - portal-ai
+  # allow_failure: true -> Pipeline lanjut meski ada temuan (ubah ke false jika ingin ketat)
+  allow_failure: true 
+  script:
+    - echo "🛡️ Memulai Security Scanning dengan Trivy..."
+    
+    # Scan kode sumber & config di folder saat ini (.)
+    # Mencari celah keamanan (vuln), password bocor (secret), dan salah config
+    - trivy fs --scanners vuln,secret,config --severity HIGH,CRITICAL .
+    
+    - echo "✅ Security Scan Selesai."
+
+# --- JOB 2: BUILD IMAGE ---
 build_images:
   stage: build
   tags:
@@ -22,30 +41,30 @@ build_images:
     - docker compose build
     - echo "✅ Build Selesai."
 
-# --- JOB 2: DEPLOY PRODUCTION ---
+# --- JOB 3: DEPLOY PRODUCTION ---
 deploy_production:
   stage: deploy
   tags:
     - portal-ai
   only:
     - main
-  needs: ["build_images"]
-  
+  needs: ["build_images"] # Tunggu build selesai
+
   script:
     - echo "🚀 Memulai Deployment..."
-    
+
     # 1. Restore .env
     - echo "$DOT_ENV_FILE" > .env
-    
-    # 2. Hapus container lama
+
+    # 2. Hapus container lama (Safety Net)
     - docker rm -f mongo internal-chat-server internal-chat-client || true
     - docker compose down --remove-orphans || true
-    
+
     # 3. Jalankan Aplikasi
-    # (Menggunakan data di folder /home/admingys/... yang sudah kita fix sebelumnya)
-    - docker compose up -d 
-    
-    # 4. Cek Kesehatan
+    # (Menggunakan data di folder /home/admingys/... yang sudah diset di docker-compose.yml)
+    - docker compose up -d
+
+    # 4. Cek Kesehatan & Bersih-bersih
     - sleep 10
     - docker compose ps
     - docker image prune -f
