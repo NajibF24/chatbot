@@ -54,23 +54,31 @@ security_scan:
     when: always
 
 # --- JOB BARU: SONARQUBE CHECK ---
+# --- UPDATE JOB: SONARQUBE CHECK (SHELL RUNNER FRIENDLY) ---
 sonarqube_check:
   stage: code_quality
-  image: 
-    name: sonarsource/sonar-scanner-cli:latest
-    entrypoint: [""]
+  # Hapus bagian 'image' karena Runner Anda Shell Executor (Image diabaikan)
   tags:
     - portal-ai
   variables:
-    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"  # Cache folder
-  cache:
-    key: "${CI_JOB_NAME}"
-    paths:
-      - .sonar/cache
+    GIT_DEPTH: "0"
   script:
-    - echo "🧠 Memulai Analisa Code Quality ke Server Infra..."
-    # Command ini otomatis baca variable SONAR_TOKEN & SONAR_HOST_URL dari GitLab
-    - sonar-scanner
+    - echo "🧠 Memulai Analisa Code Quality (via Docker Container)..."
+    
+    # Kita panggil Docker Image Scanner secara manual
+    # -rm : Hapus container setelah selesai
+    # -e  : Oper Variable Token & URL ke dalam container
+    # -v  : Mounting folder kodingan saat ini ($(pwd)) ke dalam container (/usr/src)
+    
+    - docker run --rm \
+      -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
+      -e SONAR_TOKEN="${SONAR_TOKEN}" \
+      -v "$(pwd):/usr/src" \
+      sonarsource/sonar-scanner-cli \
+      -Dsonar.projectKey=portal-ai \
+      -Dsonar.sources=. \
+      -Dsonar.exclusions="**/node_modules/**,**/dist/**,**/build/**"
+
   allow_failure: true
   only:
     - main
