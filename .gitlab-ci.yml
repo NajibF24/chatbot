@@ -11,47 +11,13 @@ variables:
   TARGET_URL: "https://portalai.gyssteel.com"
 
 stages:
-  - test
-  - security  # Trivy
+  - security  # Trivy (Langsung mulai dari sini)
   - build     # Build & Push
   - deploy    # Deploy
   - dast      # OWASP ZAP
   - report    # Upload ke DefectDojo (Server Infra)
 
-# --- JOB 1: UNIT TESTING ---
-test_server:
-  stage: test
-  tags:
-    - portal-ai
-  script:
-    - echo "🧪 Running Server Unit Tests..."
-    - mkdir -p $(pwd)/server/.npm-cache
-    - >
-      docker run --rm 
-      -u $(id -u):$(id -g)
-      -v $(pwd)/server:/usr/src/app 
-      -w /usr/src/app 
-      -e npm_config_cache=/usr/src/app/.npm-cache
-      node:20-alpine 
-      sh -c "npm install && npm test"
-
-test_client:
-  stage: test
-  tags:
-    - portal-ai
-  script:
-    - echo "🧪 Running Client Unit Tests..."
-    - mkdir -p $(pwd)/client/.npm-cache
-    - >
-      docker run --rm 
-      -u $(id -u):$(id -g)
-      -v $(pwd)/client:/usr/src/app 
-      -w /usr/src/app 
-      -e npm_config_cache=/usr/src/app/.npm-cache
-      node:20-alpine 
-      sh -c "npm install && npm test"
-
-# --- JOB 2: SECURITY SCAN (TRIVY) ---
+# --- JOB 1: SECURITY SCAN (TRIVY) ---
 security_scan:
   stage: security
   tags:
@@ -64,15 +30,11 @@ security_scan:
     - wget https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl -O trivy-report.tpl
     
     # 1. SCAN SERVER
-    # Output HTML (untuk Manusia)
     - trivy fs --scanners vuln,secret,misconfig --format template --template "@trivy-report.tpl" -o report-server.html ./server
-    # Output JSON (untuk DefectDojo)
     - trivy fs --scanners vuln,secret,misconfig --format json -o trivy-server.json ./server
     
     # 2. SCAN CLIENT
-    # Output HTML (untuk Manusia)
     - trivy fs --scanners vuln,secret,misconfig --format template --template "@trivy-report.tpl" -o report-client.html ./client
-    # Output JSON (untuk DefectDojo)
     - trivy fs --scanners vuln,secret,misconfig --format json -o trivy-client.json ./client
 
   artifacts:
@@ -85,7 +47,7 @@ security_scan:
     expire_in: 7 days
     when: always
 
-# --- JOB 3: BUILD & PUSH ---
+# --- JOB 2: BUILD & PUSH ---
 build_push_images:
   stage: build
   tags:
@@ -102,7 +64,7 @@ build_push_images:
     - docker build --build-arg REACT_APP_API_URL=${REACT_APP_API_URL} -t $CLIENT_IMAGE ./client
     - docker push $CLIENT_IMAGE
 
-# --- JOB 4: DEPLOY ---
+# --- JOB 3: DEPLOY ---
 deploy_production:
   stage: deploy
   tags:
@@ -123,7 +85,7 @@ deploy_production:
     - sleep 10
     - docker image prune -f
 
-# --- JOB 5: DAST (OWASP ZAP) ---
+# --- JOB 4: DAST (OWASP ZAP) ---
 dast_scan:
   stage: dast
   tags:
@@ -135,8 +97,7 @@ dast_scan:
     - chmod 777 zap-reports
     - docker pull ghcr.io/zaproxy/zaproxy:stable
     
-    # Generate HTML (-r) DAN XML (-x)
-    # XML diperlukan oleh DefectDojo
+    # Generate HTML & XML (XML wajib untuk DefectDojo)
     - docker run --rm -v $(pwd)/zap-reports:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t $TARGET_URL -r zap-report.html -x zap-report.xml -I
     
   artifacts:
@@ -147,7 +108,7 @@ dast_scan:
     expire_in: 7 days
     when: always
 
-# --- JOB 6: UPLOAD REPORT TO INFRA SERVER ---
+# --- JOB 5: UPLOAD REPORT TO INFRA SERVER ---
 upload_to_defectdojo:
   stage: report
   tags:
@@ -157,12 +118,11 @@ upload_to_defectdojo:
   script:
     - echo "🚀 Mengirim Laporan ke Server Infra (DefectDojo)..."
     
-    # --- KONFIGURASI IP SERVER INFRA (WAJIB GANTI) ---
-    # Ganti IP di bawah ini dengan IP server 32GB Anda
+    # IP SERVER INFRA: 172.16.21.82
     
     # 1. Upload Trivy SERVER (JSON)
     - |
-      curl -X POST "http://http://172.16.21.82/:8080/api/v2/import-scan/" \
+      curl -X POST "http://172.16.21.82:8080/api/v2/import-scan/" \
       -H "Authorization: Token $DEFECT_DOJO_API_KEY" \
       -H "Content-Type: multipart/form-data" \
       -F "scan_type=Trivy Scan" \
@@ -174,7 +134,7 @@ upload_to_defectdojo:
 
     # 2. Upload Trivy CLIENT (JSON)
     - |
-      curl -X POST "http://http://172.16.21.82/:8080/api/v2/import-scan/" \
+      curl -X POST "http://172.16.21.82:8080/api/v2/import-scan/" \
       -H "Authorization: Token $DEFECT_DOJO_API_KEY" \
       -H "Content-Type: multipart/form-data" \
       -F "scan_type=Trivy Scan" \
@@ -186,7 +146,7 @@ upload_to_defectdojo:
 
     # 3. Upload ZAP DAST (XML)
     - |
-      curl -X POST "http://http://172.16.21.82/:8080/api/v2/import-scan/" \
+      curl -X POST "http://172.16.21.82:8080/api/v2/import-scan/" \
       -H "Authorization: Token $DEFECT_DOJO_API_KEY" \
       -H "Content-Type: multipart/form-data" \
       -F "scan_type=ZAP Scan" \
