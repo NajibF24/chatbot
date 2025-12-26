@@ -19,43 +19,35 @@ stages:
 # --- JOB 1: SECURITY SCAN (TRIVY + HTML REPORT) ---
 # Ini ringan, aman dijalankan di server 4GB
 # --- JOB 1: SECURITY SCAN (TERPISAH SERVER & CLIENT) ---
-# --- JOB: UNIT TESTING SERVER ---
-# --- JOB: UNIT TESTING SERVER ---
 test_server:
   stage: test
   tags:
     - portal-ai
   script:
-    - echo "🧪 Running Server Unit Tests inside Docker..."
+    - echo "🧪 Running Server Unit Tests..."
+    # Kita tambahkan flag -u (User) agar file node_modules tidak 'nyangkut' sebagai root
     - >
       docker run --rm 
+      -u $(id -u):$(id -g)
       -v $(pwd)/server:/usr/src/app 
       -w /usr/src/app 
       node:20-alpine 
-      sh -c "npm install && npm test -- --watchAll=false --passWithNoTests"
+      sh -c "npm install && npm test -- --passWithNoTests"
 
-# --- JOB: UNIT TESTING CLIENT ---
 test_client:
   stage: test
   tags:
     - portal-ai
   script:
-    - echo "🧪 Running Client Unit Tests inside Docker..."
+    - echo "🧪 Running Client Unit Tests..."
     - >
       docker run --rm 
+      -u $(id -u):$(id -g)
       -v $(pwd)/client:/usr/src/app 
       -w /usr/src/app 
       node:20-alpine 
-      sh -c "npm install && npm test -- --watchAll=false --passWithNoTests"
-  stage: test
-  tags:
-    - portal-ai
-  script:
-    - echo "🧪 Running Client Unit Tests..."
-    - cd client
-    - npm install
-    - npm test -- --watchAll=false --passWithNoTests
-    
+      sh -c "npm install && npm test -- --passWithNoTests"
+
 security_scan:
   stage: security
   tags:
