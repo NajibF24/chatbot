@@ -55,9 +55,9 @@ security_scan:
 
 # --- JOB BARU: SONARQUBE CHECK ---
 # --- UPDATE JOB: SONARQUBE CHECK (SHELL RUNNER FRIENDLY) ---
+# --- FIX: SONARQUBE CHECK (SINGLE LINE COMMAND) ---
 sonarqube_check:
   stage: code_quality
-  # Hapus bagian 'image' karena Runner Anda Shell Executor (Image diabaikan)
   tags:
     - portal-ai
   variables:
@@ -65,24 +65,13 @@ sonarqube_check:
   script:
     - echo "🧠 Memulai Analisa Code Quality (via Docker Container)..."
     
-    # Kita panggil Docker Image Scanner secara manual
-    # -rm : Hapus container setelah selesai
-    # -e  : Oper Variable Token & URL ke dalam container
-    # -v  : Mounting folder kodingan saat ini ($(pwd)) ke dalam container (/usr/src)
-    
-    - docker run --rm \
-      -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
-      -e SONAR_TOKEN="${SONAR_TOKEN}" \
-      -v "$(pwd):/usr/src" \
-      sonarsource/sonar-scanner-cli \
-      -Dsonar.projectKey=portal-ai \
-      -Dsonar.sources=. \
-      -Dsonar.exclusions="**/node_modules/**,**/dist/**,**/build/**"
+    # PERBAIKAN: Perintah dijalankan dalam satu baris memanjang agar tidak error parsing
+    - docker run --rm -e SONAR_HOST_URL="${SONAR_HOST_URL}" -e SONAR_TOKEN="${SONAR_TOKEN}" -v "$(pwd):/usr/src" sonarsource/sonar-scanner-cli -Dsonar.projectKey=portal-ai -Dsonar.sources=. -Dsonar.exclusions="**/node_modules/**,**/dist/**,**/build/**"
 
   allow_failure: true
   only:
     - main
-
+    
 # --- JOB 3: BUILD & PUSH ---
 build_push_images:
   stage: build
