@@ -2,7 +2,7 @@ variables:
   # Folder custom (Wajib karena kita pakai custom_build_dir)
   GIT_CLONE_PATH: '$CI_BUILDS_DIR/$CI_CONCURRENT_ID/project-baru-bersih'
   GIT_CLEAN_FLAGS: -ffdx -e data/
-  
+  #test
   # Definisi Nama Image di Registry GitLab Pusat
   # Ini akan menyimpan image ke git.gyssteel.com:5050/...
   SERVER_IMAGE: $CI_REGISTRY_IMAGE/server:latest
