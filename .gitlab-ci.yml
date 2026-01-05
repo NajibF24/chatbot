@@ -27,21 +27,23 @@ stages:
 # ==========================================================
 # 1. CODE QUALITY CHECK (SONARQUBE) - FIXED FOR SHELL RUNNER
 # ==========================================================
+# ==========================================================
+# 1. CODE QUALITY CHECK (SONARQUBE) - FIX PERMISSIONS & ARGS
+# ==========================================================
 sonarqube_check:
   stage: code_quality
   tags:
     - portal-ai
-  # Hapus 'image: node...' karena runner Anda shell executor
   variables:
     GIT_DEPTH: "0"
   script:
     - echo "🧠 Memulai Analisa Code Quality via Docker..."
     
-    # KITA JALANKAN SEMUA PROSES DI DALAM CONTAINER SEMENTARA
-    # 1. Mount folder saat ini ($(pwd)) ke dalam container
-    # 2. Install Java (untuk scanner) & sonar-report (untuk json) di dalam container
-    # 3. Jalankan Scan & Generate Report
+    # 1. Ambil ID User GitLab Runner di Host (Server)
+    - export HOST_UID=$(id -u)
+    - export HOST_GID=$(id -g)
     
+    # 2. Jalankan Docker
     - |
       docker run --rm \
       -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
@@ -50,7 +52,7 @@ sonarqube_check:
       -w /usr/src \
       node:lts-bullseye \
       /bin/bash -c "
-        echo '📦 Installing Dependencies inside container...' &&
+        echo '📦 Installing Dependencies...' &&
         apt-get update > /dev/null && 
         apt-get install -y default-jre > /dev/null &&
         npm install -g sonarqube-scanner sonar-report > /dev/null &&
@@ -64,12 +66,17 @@ sonarqube_check:
           -Dsonar.exclusions='**/node_modules/**,**/dist/**,**/build/**,**/coverage/**' &&
           
         echo '📝 Generating DefectDojo Report...' &&
+        # FIX 1: Ganti --sonarauth menjadi --token (sesuai standar npm sonar-report)
         sonar-report \
           --sonarurl=\$SONAR_HOST_URL \
           --sonarcomponent='portal-ai' \
           --project='portal-ai' \
-          --sonarauth=\$SONAR_TOKEN \
-          --output=sonar-report.json
+          --token=\$SONAR_TOKEN \
+          --output=sonar-report.json &&
+        
+        echo '🧹 Fixing Permissions...' &&
+        # FIX 2: Kembalikan kepemilikan file ke user GitLab Runner agar tidak error Permission Denied
+        chown -R $HOST_UID:$HOST_GID .
       "
 
   artifacts:
