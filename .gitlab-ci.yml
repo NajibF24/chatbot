@@ -25,36 +25,53 @@ stages:
   - report        # Upload ke DefectDojo
 
 # ==========================================================
-# 1. CODE QUALITY CHECK (SONARQUBE)
+# 1. CODE QUALITY CHECK (SONARQUBE) - FIXED FOR SHELL RUNNER
 # ==========================================================
 sonarqube_check:
   stage: code_quality
   tags:
     - portal-ai
-  # Kita pakai image Node.js agar bisa install sonar-report (converter)
-  image: node:lts-bullseye 
+  # Hapus 'image: node...' karena runner Anda shell executor
   variables:
-    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"  # Cache location
     GIT_DEPTH: "0"
-  cache:
-    key: "${CI_JOB_NAME}"
-    paths:
-      - .sonar/cache
   script:
-    - echo "🧠 Memulai Analisa Code Quality & Generate Report..."
+    - echo "🧠 Memulai Analisa Code Quality via Docker..."
     
-    # 1. Install Java (Wajib untuk Sonar Scanner)
-    - apt-get update && apt-get install -y default-jre
+    # KITA JALANKAN SEMUA PROSES DI DALAM CONTAINER SEMENTARA
+    # 1. Mount folder saat ini ($(pwd)) ke dalam container
+    # 2. Install Java (untuk scanner) & sonar-report (untuk json) di dalam container
+    # 3. Jalankan Scan & Generate Report
     
-    # 2. Install Scanner & Converter tool
-    - npm install -g sonarqube-scanner sonar-report
-    
-    # 3. Jalankan Scanner
-    - sonar-scanner -Dsonar.projectKey=portal-ai -Dsonar.sources=. -Dsonar.host.url="${SONAR_HOST_URL}" -Dsonar.login="${SONAR_TOKEN}" -Dsonar.exclusions="**/node_modules/**,**/dist/**,**/build/**,**/coverage/**"
-    
-    # 4. Generate JSON Report khusus untuk DefectDojo
-    - sonar-report --sonarurl="${SONAR_HOST_URL}" --sonarcomponent="portal-ai" --project="portal-ai" --sonarauth="${SONAR_TOKEN}" --output=sonar-report.json
-  
+    - |
+      docker run --rm \
+      -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
+      -e SONAR_TOKEN="${SONAR_TOKEN}" \
+      -v "$(pwd):/usr/src" \
+      -w /usr/src \
+      node:lts-bullseye \
+      /bin/bash -c "
+        echo '📦 Installing Dependencies inside container...' &&
+        apt-get update > /dev/null && 
+        apt-get install -y default-jre > /dev/null &&
+        npm install -g sonarqube-scanner sonar-report > /dev/null &&
+        
+        echo '🔍 Running Sonar Scanner...' &&
+        sonar-scanner \
+          -Dsonar.projectKey=portal-ai \
+          -Dsonar.sources=. \
+          -Dsonar.host.url=\$SONAR_HOST_URL \
+          -Dsonar.login=\$SONAR_TOKEN \
+          -Dsonar.exclusions='**/node_modules/**,**/dist/**,**/build/**,**/coverage/**' &&
+          
+        echo '📝 Generating DefectDojo Report...' &&
+        sonar-report \
+          --sonarurl=\$SONAR_HOST_URL \
+          --sonarcomponent='portal-ai' \
+          --project='portal-ai' \
+          --sonarauth=\$SONAR_TOKEN \
+          --output=sonar-report.json
+      "
+
   artifacts:
     paths:
       - sonar-report.json
