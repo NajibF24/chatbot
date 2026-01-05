@@ -1,46 +1,71 @@
 variables:
-  # Folder custom (Sesuaikan jika perlu, defaultnya biasanya ok)
-  GIT_CLONE_PATH: '$CI_BUILDS_DIR/$CI_CONCURRENT_ID/project-baru-bersih'
+  # --- KONFIGURASI UMUM ---
+  GIT_CLONE_PATH: '$CI_BUILDS_DIR/$CI_CONCURRENT_ID/project-portal-ai'
   GIT_CLEAN_FLAGS: -ffdx -e data/
-  
-  # Definisi Nama Image (Menggunakan SHA commit untuk versioning yang unik)
+  GIT_DEPTH: "0" # Penting untuk deteksi "New Code" di SonarQube
+
+  # --- DOCKER IMAGES (Versioning dengan SHA Commit) ---
   SERVER_IMAGE: $CI_REGISTRY_IMAGE/server:$CI_COMMIT_SHORT_SHA
   SERVER_IMAGE_LATEST: $CI_REGISTRY_IMAGE/server:latest
-  
   CLIENT_IMAGE: $CI_REGISTRY_IMAGE/client:$CI_COMMIT_SHORT_SHA
   CLIENT_IMAGE_LATEST: $CI_REGISTRY_IMAGE/client:latest
-  
-  # URL Website untuk DAST Scan
+
+  # --- TARGET ---
   TARGET_URL: "https://portalai.gyssteel.com"
   
-  # PENTING: Agar SonarQube bisa mendeteksi "New Code" vs "Old Code"
-  GIT_DEPTH: "0"
+  # --- DEFECT DOJO URL (Internal IP) ---
+  DD_URL: "http://172.16.21.82:8080"
 
 stages:
-  - code_quality  # 1. Cek Source Code (SonarQube)
-  - build         # 2. Build Docker Image
-  - security      # 3. Cek Image OS & App (Trivy)
-  - deploy        # 4. Deploy ke Production
-  - dast          # 5. Attack Website Live (ZAP)
-  - report        # 6. Lapor ke DefectDojo
+  - code_quality  # SAST (SonarQube)
+  - build         # Docker Build
+  - security      # Container Scan (Trivy)
+  - deploy        # Deploy ke Server
+  - dast          # Web Attack Scan (ZAP)
+  - report        # Upload ke DefectDojo
 
-# --- JOB 1: CODE QUALITY (SONARQUBE) ---
-# Dijalankan paling awal. Jika kodingan berantakan, fail di sini.
+# ==========================================================
+# 1. CODE QUALITY CHECK (SONARQUBE)
+# ==========================================================
 sonarqube_check:
   stage: code_quality
   tags:
     - portal-ai
+  # Kita pakai image Node.js agar bisa install sonar-report (converter)
+  image: node:lts-bullseye 
   variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"  # Cache location
     GIT_DEPTH: "0"
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
   script:
-    - echo "🧠 Memulai Analisa Code Quality (SAST)..."
-    # Menggunakan docker run untuk sonar-scanner (Single Line Command agar aman)
-    - docker run --rm -e SONAR_HOST_URL="${SONAR_HOST_URL}" -e SONAR_TOKEN="${SONAR_TOKEN}" -v "$(pwd):/usr/src" sonarsource/sonar-scanner-cli -Dsonar.projectKey=portal-ai -Dsonar.sources=. -Dsonar.exclusions="**/node_modules/**,**/dist/**,**/build/**,**/coverage/**"
+    - echo "🧠 Memulai Analisa Code Quality & Generate Report..."
+    
+    # 1. Install Java (Wajib untuk Sonar Scanner)
+    - apt-get update && apt-get install -y default-jre
+    
+    # 2. Install Scanner & Converter tool
+    - npm install -g sonarqube-scanner sonar-report
+    
+    # 3. Jalankan Scanner
+    - sonar-scanner -Dsonar.projectKey=portal-ai -Dsonar.sources=. -Dsonar.host.url="${SONAR_HOST_URL}" -Dsonar.login="${SONAR_TOKEN}" -Dsonar.exclusions="**/node_modules/**,**/dist/**,**/build/**,**/coverage/**"
+    
+    # 4. Generate JSON Report khusus untuk DefectDojo
+    - sonar-report --sonarurl="${SONAR_HOST_URL}" --sonarcomponent="portal-ai" --project="portal-ai" --sonarauth="${SONAR_TOKEN}" --output=sonar-report.json
+  
+  artifacts:
+    paths:
+      - sonar-report.json
+    expire_in: 1 day
   allow_failure: true
   only:
     - main
 
-# --- JOB 2: BUILD & PUSH ---
+# ==========================================================
+# 2. BUILD & PUSH DOCKER IMAGES
+# ==========================================================
 build_push_images:
   stage: build
   tags:
@@ -51,9 +76,10 @@ build_push_images:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
   script:
     - echo "🏗️ Building & Pushing Images..."
+    # Buat .env dari Variable GitLab
     - echo "$DOT_ENV_FILE" > .env
     
-    # Build Server (Push 2 tag: SHA unik & Latest)
+    # Build Server
     - docker build -t $SERVER_IMAGE -t $SERVER_IMAGE_LATEST ./server
     - docker push $SERVER_IMAGE
     - docker push $SERVER_IMAGE_LATEST
@@ -63,51 +89,45 @@ build_push_images:
     - docker push $CLIENT_IMAGE
     - docker push $CLIENT_IMAGE_LATEST
 
-# --- JOB 3: TRIVY IMAGE SCAN (Container Security) ---
-# Dilakukan SETELAH build, mengecek Image final (OS + App)
+# ==========================================================
+# 3. CONTAINER SECURITY SCAN (TRIVY)
+# ==========================================================
 container_security_scan:
   stage: security
   tags:
     - portal-ai
-  needs: ["build_push_images"] # Wajib tunggu build selesai
+  needs: ["build_push_images"]
   allow_failure: true
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
   script:
     - echo "🛡️ Memulai Container Security Scanning..."
-    - wget https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl -O trivy-report.tpl
     
-    # 1. SCAN IMAGE SERVER (Full Layer Scan)
-    - echo "🔍 Scanning Server Image..."
-    - trivy image --scanners vuln,secret,misconfig --format template --template "@trivy-report.tpl" -o report-server.html $SERVER_IMAGE
+    # 1. Scan Server Image
     - trivy image --scanners vuln,secret,misconfig --format json -o trivy-server.json $SERVER_IMAGE
     
-    # 2. SCAN IMAGE CLIENT (Full Layer Scan)
-    - echo "🔍 Scanning Client Image..."
-    - trivy image --scanners vuln,secret,misconfig --format template --template "@trivy-report.tpl" -o report-client.html $CLIENT_IMAGE
+    # 2. Scan Client Image
     - trivy image --scanners vuln,secret,misconfig --format json -o trivy-client.json $CLIENT_IMAGE
 
   artifacts:
-    name: "Security-Reports-$CI_COMMIT_SHORT_SHA"
     paths:
-      - report-server.html
       - trivy-server.json
-      - report-client.html
       - trivy-client.json
-    expire_in: 7 days
-    when: always
+    expire_in: 1 day
+  when: always
 
-# --- JOB 4: DEPLOY ---
+# ==========================================================
+# 4. DEPLOY TO PRODUCTION
+# ==========================================================
 deploy_production:
   stage: deploy
   tags:
     - portal-ai
   only:
     - main
-  # Optional: Tambahkan 'needs: ["container_security_scan"]' jika ingin block deploy kalau scan error
   needs: ["container_security_scan"] 
   before_script:
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY    
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY      
   script:
     - echo "🚀 Memulai Deployment..."
     - echo "$DOT_ENV_FILE" > .env
@@ -116,22 +136,24 @@ deploy_production:
     - docker rm -f mongo internal-chat-server internal-chat-client || true
     - docker compose down --remove-orphans || true
     
-    # Pull image terbaru (LATEST)
+    # Pull image terbaru
     - docker pull $SERVER_IMAGE_LATEST
     - docker pull $CLIENT_IMAGE_LATEST
     
-    # Up
+    # Start Services
     - docker compose up -d 
     - sleep 10
     - docker image prune -f
 
-# --- JOB 5: DAST (ZAP) ---
+# ==========================================================
+# 5. DAST SCAN (ZAP)
+# ==========================================================
 dast_scan:
   stage: dast
   tags:
     - portal-ai
   allow_failure: true
-  needs: ["deploy_production"] # Tunggu deploy selesai baru di-attack
+  needs: ["deploy_production"]
   script:
     - echo "🕵️ Memulai DAST Scanning (Passive Scan)..."
     - mkdir -p zap-reports
@@ -142,56 +164,85 @@ dast_scan:
     - docker run --rm -v $(pwd)/zap-reports:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t $TARGET_URL -r zap-report.html -x zap-report.xml -I
     
   artifacts:
-    name: "DAST-Report-$CI_COMMIT_SHORT_SHA"
     paths:
-      - zap-reports/zap-report.html
       - zap-reports/zap-report.xml
-    expire_in: 7 days
-    when: always
+    expire_in: 1 day
+  when: always
 
-# --- JOB 6: UPLOAD REPORT TO DEFECTDOJO ---
+# ==========================================================
+# 6. UPLOAD REPORT TO DEFECTDOJO (ALL IN ONE)
+# ==========================================================
 upload_to_defectdojo:
   stage: report
   tags:
     - portal-ai
   image: curlimages/curl
   allow_failure: true
-  needs: ["container_security_scan", "dast_scan"]
+  # Job ini jalan setelah semua scan selesai
+  needs: ["sonarqube_check", "container_security_scan", "dast_scan"]
   script:
-    - echo "📊 Mengirim Laporan ke DefectDojo..."
+    - echo "📊 Mengirim SEMUA Laporan ke DefectDojo..."
     
-    # Upload Trivy SERVER (Type: Trivy Scan)
+    # 1. Upload SonarQube (SAST)
     - |
-      curl -X POST "http://172.16.21.82:8080/api/v2/import-scan/" \
-      -H "Authorization: Token $DEFECT_DOJO_API_KEY" \
-      -H "Content-Type: multipart/form-data" \
-      -F "scan_type=Trivy Scan" \
-      -F "file=@trivy-server.json" \
-      -F "product_name=Portal AI" \
-      -F "engagement_name=GitLab CI Pipeline" \
-      -F "auto_create_context=true" \
-      -F "close_old_findings=true"
+      if [ -f "sonar-report.json" ]; then
+        echo "Uploading SonarQube Report..."
+        curl -X POST "$DD_URL/api/v2/import-scan/" \
+        -H "Authorization: Token $DEFECT_DOJO_API_KEY" \
+        -H "Content-Type: multipart/form-data" \
+        -F "scan_type=SonarQube Scan" \
+        -F "file=@sonar-report.json" \
+        -F "product_name=Portal AI" \
+        -F "engagement_name=GitLab CI Pipeline" \
+        -F "auto_create_context=true" \
+        -F "close_old_findings=true"
+      else
+        echo "⚠️ sonar-report.json tidak ditemukan."
+      fi
 
-    # Upload Trivy CLIENT (Type: Trivy Scan)
+    # 2. Upload Trivy SERVER (Container)
     - |
-      curl -X POST "http://172.16.21.82:8080/api/v2/import-scan/" \
-      -H "Authorization: Token $DEFECT_DOJO_API_KEY" \
-      -H "Content-Type: multipart/form-data" \
-      -F "scan_type=Trivy Scan" \
-      -F "file=@trivy-client.json" \
-      -F "product_name=Portal AI" \
-      -F "engagement_name=GitLab CI Pipeline" \
-      -F "auto_create_context=true" \
-      -F "close_old_findings=true"
+      if [ -f "trivy-server.json" ]; then
+        echo "Uploading Trivy Server Report..."
+        curl -X POST "$DD_URL/api/v2/import-scan/" \
+        -H "Authorization: Token $DEFECT_DOJO_API_KEY" \
+        -H "Content-Type: multipart/form-data" \
+        -F "scan_type=Trivy Scan" \
+        -F "file=@trivy-server.json" \
+        -F "product_name=Portal AI" \
+        -F "engagement_name=GitLab CI Pipeline" \
+        -F "service=Backend Server" \
+        -F "auto_create_context=true" \
+        -F "close_old_findings=true"
+      fi
 
-    # Upload ZAP DAST (Type: ZAP Scan)
+    # 3. Upload Trivy CLIENT (Container)
     - |
-      curl -X POST "http://172.16.21.82:8080/api/v2/import-scan/" \
-      -H "Authorization: Token $DEFECT_DOJO_API_KEY" \
-      -H "Content-Type: multipart/form-data" \
-      -F "scan_type=ZAP Scan" \
-      -F "file=@zap-reports/zap-report.xml" \
-      -F "product_name=Portal AI" \
-      -F "engagement_name=GitLab CI Pipeline" \
-      -F "auto_create_context=true" \
-      -F "close_old_findings=true"
+      if [ -f "trivy-client.json" ]; then
+        echo "Uploading Trivy Client Report..."
+        curl -X POST "$DD_URL/api/v2/import-scan/" \
+        -H "Authorization: Token $DEFECT_DOJO_API_KEY" \
+        -H "Content-Type: multipart/form-data" \
+        -F "scan_type=Trivy Scan" \
+        -F "file=@trivy-client.json" \
+        -F "product_name=Portal AI" \
+        -F "engagement_name=GitLab CI Pipeline" \
+        -F "service=Frontend Client" \
+        -F "auto_create_context=true" \
+        -F "close_old_findings=true"
+      fi
+
+    # 4. Upload ZAP (DAST)
+    - |
+      if [ -f "zap-reports/zap-report.xml" ]; then
+        echo "Uploading ZAP DAST Report..."
+        curl -X POST "$DD_URL/api/v2/import-scan/" \
+        -H "Authorization: Token $DEFECT_DOJO_API_KEY" \
+        -H "Content-Type: multipart/form-data" \
+        -F "scan_type=ZAP Scan" \
+        -F "file=@zap-reports/zap-report.xml" \
+        -F "product_name=Portal AI" \
+        -F "engagement_name=GitLab CI Pipeline" \
+        -F "auto_create_context=true" \
+        -F "close_old_findings=true"
+      fi
