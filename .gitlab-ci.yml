@@ -25,7 +25,7 @@ stages:
   - report        # Upload ke DefectDojo
 
 # ==========================================================
-# 1. CODE QUALITY CHECK (SONARQUBE) - ROBUST VERSION 🛡️
+# 1. CODE QUALITY CHECK (SONARQUBE) - DIRECT API VERSION 🚀
 # ==========================================================
 sonarqube_check:
   stage: code_quality
@@ -40,7 +40,7 @@ sonarqube_check:
     - export HOST_UID=$(id -u)
     - export HOST_GID=$(id -g)
     
-    # 2. Jalankan Docker dengan Trap EXIT
+    # 2. Jalankan Docker
     - |
       docker run --rm \
       -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
@@ -49,35 +49,33 @@ sonarqube_check:
       -w /usr/src \
       node:lts-bullseye \
       /bin/bash -c "
-        # FUNGSI PEMBERSIH: Akan selalu jalan saat script selesai/error
+        # FUNGSI PEMBERSIH: Selalu jalan saat exit
         function cleanup {
             echo '🧹 Fixing Permissions (Running cleanup)...'
             chown -R $HOST_UID:$HOST_GID .
         }
-        # Daftarkan fungsi cleanup agar jalan saat EXIT
         trap cleanup EXIT
 
         echo '📦 Installing Dependencies...' &&
         apt-get update > /dev/null && 
-        apt-get install -y default-jre > /dev/null &&
-        npm install -g sonarqube-scanner sonar-report > /dev/null &&
+        apt-get install -y default-jre curl > /dev/null && 
+        npm install -g sonarqube-scanner > /dev/null &&
         
         echo '🔍 Running Sonar Scanner...' &&
+        # TAMBAHAN PENTING: -Dsonar.qualitygate.wait=true
+        # Agar scanner menunggu server selesai memproses report sebelum lanjut
         sonar-scanner \
           -Dsonar.projectKey=portal-ai \
           -Dsonar.sources=. \
           -Dsonar.host.url=\$SONAR_HOST_URL \
           -Dsonar.login=\$SONAR_TOKEN \
+          -Dsonar.qualitygate.wait=true \
           -Dsonar.exclusions='**/node_modules/**,**/dist/**,**/build/**,**/coverage/**' &&
           
-        echo '📝 Generating DefectDojo Report...' &&
-        # Pastikan menggunakan --token, BUKAN --sonarauth
-        sonar-report \
-          --sonarurl=\$SONAR_HOST_URL \
-          --sonarcomponent='portal-ai' \
-          --project='portal-ai' \
-          --token=\$SONAR_TOKEN \
-          --output=sonar-report.json
+        echo '📝 Fetching Report from SonarQube API...' &&
+        # KITA PAKAI CURL LANGSUNG KE API (Lebih Stabil)
+        # Mengambil 500 issues pertama (bisa dinaikkan jika perlu)
+        curl -s -u \"\$SONAR_TOKEN:\" \"\$SONAR_HOST_URL/api/issues/search?componentKeys=portal-ai&ps=500\" -o sonar-report.json
       "
 
   artifacts:
