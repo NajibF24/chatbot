@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import ReactMarkdown from 'react-markdown'; // ✅ Wajib import ini
-import remarkGfm from 'remark-gfm';         // ✅ Wajib untuk tabel
+import { useNavigate } from 'react-router-dom'; // ✅ Wajib import ini
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const Chat = ({ user, handleLogout }) => {
+  const navigate = useNavigate(); // ✅ Hook navigasi
+  
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
   
@@ -200,6 +203,7 @@ const Chat = ({ user, handleLogout }) => {
           <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden text-slate-400 hover:text-white">✕</button>
         </div>
 
+        {/* LIST BOT & HISTORY */}
         <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-thin scrollbar-thumb-slate-600">
           <div>
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 px-2">Assistant</h3>
@@ -257,7 +261,23 @@ const Chat = ({ user, handleLogout }) => {
           </div>
         </div>
 
-        <div className="p-4 border-t border-slate-700 bg-slate-800">
+        {/* ✅ FOOTER DENGAN TOMBOL ADMIN */}
+        <div className="p-4 border-t border-slate-700 bg-slate-800 space-y-3">
+           
+           {/* Tombol Admin (Hanya muncul jika isAdmin = true) */}
+           {user?.isAdmin && (
+             <button 
+               onClick={() => navigate('/admin')}
+               className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-700/50 hover:bg-slate-700 hover:text-white text-slate-300 text-xs font-semibold rounded-lg border border-slate-600 transition-all hover:border-slate-500 mb-2"
+             >
+               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+               </svg>
+               Admin Dashboard
+             </button>
+           )}
+
            <div className="flex items-center gap-3">
              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shadow-md">
                 {user?.username?.substring(0,2).toUpperCase() || 'US'}
@@ -329,19 +349,16 @@ const Chat = ({ user, handleLogout }) => {
                       </div>
                   )}
 
-                  {/* ✅ FIX TABEL: Menggunakan ReactMarkdown agar tabel ter-render rapi */}
                   <div className="text-sm leading-relaxed overflow-x-auto">
                     <ReactMarkdown 
                         remarkPlugins={[remarkGfm]}
                         components={{
-                            // Styling Tabel Dark Mode
                             table: ({node, ...props}) => <table className="w-full text-sm text-left text-slate-300 border-collapse border border-slate-600 my-4" {...props} />,
                             thead: ({node, ...props}) => <thead className="text-xs text-slate-200 uppercase bg-slate-800/50" {...props} />,
                             tbody: ({node, ...props}) => <tbody {...props} />,
                             tr: ({node, ...props}) => <tr className="bg-transparent border-b border-slate-600 hover:bg-slate-600/20" {...props} />,
                             th: ({node, ...props}) => <th className="px-4 py-3 border-r border-slate-600 font-bold" {...props} />,
                             td: ({node, ...props}) => <td className="px-4 py-3 border-r border-slate-600" {...props} />,
-                            // Styling Text Lainnya
                             p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
                             ul: ({node, ...props}) => <ul className="list-disc ml-5 mb-2" {...props} />,
                             ol: ({node, ...props}) => <ol className="list-decimal ml-5 mb-2" {...props} />,
