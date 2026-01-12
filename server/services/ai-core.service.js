@@ -1,10 +1,11 @@
 import OpenAI from 'openai';
 import pdf from 'pdf-parse';
 import mammoth from 'mammoth';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx'; // ✅ FIX: Ganti import agar readFile terbaca
 import fs from 'fs';
 import path from 'path';
-import officeParser from 'officeparser'; // ✅ LIBRARY BARU (Wajib npm install officeparser)
+import officeParser from 'officeparser'; // ✅ FIX: Import langsung (karena sudah di package.json)
+
 import Chat from '../models/Chat.js';
 import Thread from '../models/Thread.js';
 import Bot from '../models/Bot.js';
@@ -18,15 +19,7 @@ class AICoreService {
     this.fileManager = new FileManagerService();
   }
 
-  isDataQuery(message) {
-    const lowerMsg = (message || '').toLowerCase();
-    const visualKeywords = ['dashboard', 'gambar', 'image', 'foto', 'screenshot'];
-    if (visualKeywords.some(k => lowerMsg.includes(k))) return false;
-    const dataKeywords = ['berikan', 'tampilkan', 'cari', 'list', 'daftar', 'semua', 'project', 'status', 'progress', 'overdue', 'summary', 'health', 'analisa', 'resume', 'data', 'nilai', 'code', 'coding', 'script', 'excel', 'word', 'pembayaran', 'termin', 'kontrak', 'top'];
-    return dataKeywords.some(k => lowerMsg.includes(k));
-  }
-
-  // --- 1. UNIVERSAL FILE EXTRACTOR (UPDATED FOR OFFICE FILES) ---
+  // --- 1. UNIVERSAL FILE EXTRACTOR ---
   async extractFileContent(attachedFile) {
       if (!attachedFile || !attachedFile.path) return null;
       
@@ -35,9 +28,9 @@ class AICoreService {
       const ext = path.extname(originalName).toLowerCase();
       let content = null;
       let displayType = 'FILE';
-      
-      // Limit karakter agar tidak overload token AI (200k chars)
       const CHAR_LIMIT = 200000; 
+
+      console.log(`📂 [FILE START] Reading: ${originalName} (${mime}) Size: ${attachedFile.size} bytes`);
 
       try {
           // A. PDF HANDLING
@@ -49,59 +42,76 @@ class AICoreService {
           }
           // B. WORD HANDLING (.docx)
           else if (mime.includes('wordprocessingml') || ext === '.docx') {
-              // Coba pakai Mammoth dulu (lebih cepat untuk teks)
               try {
                   const result = await mammoth.extractRawText({ path: attachedFile.path });
                   content = result.value;
+                  displayType = 'DOCX (Mammoth)';
               } catch (err) {
-                  // Fallback ke officeParser jika mammoth gagal
-                  console.log("Mammoth failed, trying officeParser for DOCX...");
-                  content = await officeParser.parseOfficeAsync(attachedFile.path);
+                  console.log("Mammoth error, trying fallback...", err.message);
+                  try {
+                      content = await officeParser.parseOfficeAsync(attachedFile.path);
+                      displayType = 'DOCX (OfficeParser)';
+                  } catch (opErr) {
+                      console.error("OfficeParser failed:", opErr);
+                  }
               }
-              displayType = 'DOCX';
           }
-          // C. EXCEL HANDLING (.xlsx, .xls) - BACA SEMUA SHEET
+          // C. EXCEL HANDLING (.xlsx) - ✅ SUDAH DIPERBAIKI
           else if (ext === '.xlsx' || ext === '.xls' || mime.includes('spreadsheet')) {
+              console.log("📊 Reading Excel file...");
+              // Menggunakan XLSX.readFile (sekarang sudah terbaca karena import diperbaiki)
               const workbook = XLSX.readFile(attachedFile.path);
               let allSheetsData = [];
               
-              // Loop semua sheet, bukan cuma yang pertama
               workbook.SheetNames.forEach(sheetName => {
                   const sheet = workbook.Sheets[sheetName];
-                  const csv = XLSX.utils.sheet_to_csv(sheet);
+                  // Gunakan options { FS: '\t' } agar format lebih rapi
+                  const csv = XLSX.utils.sheet_to_csv(sheet, { FS: '\t' }); 
                   if (csv && csv.trim().length > 0) {
-                      allSheetsData.push(`[SHEET NAME: ${sheetName}]\n${csv}`);
+                      allSheetsData.push(`[SHEET: ${sheetName}]\n${csv}`);
                   }
               });
               
-              content = allSheetsData.join('\n\n-------------------\n\n');
-              displayType = `EXCEL (${workbook.SheetNames.length} Sheets)`;
+              if (allSheetsData.length > 0) {
+                  content = allSheetsData.join('\n\n====================\n\n');
+                  displayType = `EXCEL (${workbook.SheetNames.length} Sheets)`;
+              } else {
+                  console.warn("⚠️ Excel file terbaca tapi kosong.");
+              }
           }
-          // D. POWERPOINT HANDLING (.pptx) - ✅ NEW FEATURE
+          // D. POWERPOINT (.pptx)
           else if (ext === '.pptx' || ext === '.ppt' || mime.includes('presentation')) {
-              // Menggunakan officeParser untuk ekstrak teks dari slide
-              content = await officeParser.parseOfficeAsync(attachedFile.path);
-              displayType = 'POWERPOINT (PPTX)';
+              console.log("📽️ Reading PowerPoint file...");
+              try {
+                  content = await officeParser.parseOfficeAsync(attachedFile.path);
+                  displayType = 'POWERPOINT';
+              } catch (err) {
+                  console.error("PPT Parse Error:", err);
+                  content = `[SYSTEM ERROR: Gagal membaca PPT. ${err.message}]`;
+              }
           }
-          // E. TEXT/CODE HANDLING
+          // E. TEXT/CODE
           else {
               const textExts = ['.txt', '.md', '.csv', '.json', '.xml', '.yaml', '.html', '.css', '.js', '.jsx', '.ts', '.py', '.java', '.c', '.cpp', '.sql', '.log', '.env'];
-              if (textExts.includes(ext) || mime.startsWith('text/') || mime.includes('json') || mime.includes('javascript')) {
+              if (textExts.includes(ext) || mime.startsWith('text/') || mime.includes('json')) {
                   content = fs.readFileSync(attachedFile.path, 'utf8');
                   displayType = 'CODE/TEXT';
               }
           }
 
           if (content) {
-              // Potong konten jika terlalu panjang
+              if (typeof content === 'object') content = JSON.stringify(content, null, 2);
               const trimmedContent = content.substring(0, CHAR_LIMIT);
+              console.log(`✅ [FILE SUCCESS] ${displayType} - Length: ${trimmedContent.length}`);
               return `\n\n[FILE START: ${originalName} (${displayType})]\n${trimmedContent}\n[FILE END]\n`;
+          } else {
+              return null;
           }
+
       } catch (e) {
-          console.error(`File extraction failed: ${e.message}`);
+          console.error(`❌ [FILE ERROR] Gagal membaca ${originalName}:`, e);
           return `\n[SYSTEM ERROR: Gagal membaca file ${originalName}. ${e.message}]`;
       }
-      return null;
   }
 
   // --- 2. MAIN PROCESS ---
@@ -135,10 +145,9 @@ class AICoreService {
         }
     }
 
-    // 3. Logic Smartsheet (Khusus OpenAI)
+    // Smartsheet Logic
     let contextData = "";
     if (bot.smartsheetConfig?.enabled) {
-        // Visual Request (Dashboard Screenshot)
         const isFileReq = this.fileManager.isFileRequest(message || '');
         if (isFileReq) {
             const query = this.fileManager.extractFileQuery(message || '');
@@ -152,7 +161,6 @@ class AICoreService {
             }
         }
 
-        // Data Query
         if (this.isDataQuery(message)) {
             const apiKey = (bot.smartsheetConfig.apiKey && bot.smartsheetConfig.apiKey.trim() !== '') ? bot.smartsheetConfig.apiKey : process.env.SMARTSHEET_API_KEY;
             const sheetId = (bot.smartsheetConfig.sheetId && bot.smartsheetConfig.sheetId.trim() !== '') ? bot.smartsheetConfig.sheetId : process.env.SMARTSHEET_PRIMARY_SHEET_ID;
@@ -169,44 +177,32 @@ class AICoreService {
         }
     }
 
-    // 4. Construct System Prompt (Khusus OpenAI)
+    // System Prompt
     let systemPrompt = bot.systemPrompt || "Anda adalah asisten AI.";
     if (contextData) {
         if (systemPrompt.includes('{{CONTEXT}}')) systemPrompt = systemPrompt.replace('{{CONTEXT}}', contextData);
         else systemPrompt += `\n\n${contextData}`;
     }
 
-    // 5. AI EXECUTION
+    // AI Execution
     let aiResponse = "";
     
-    // ✅ KOUVENTA LOGIC
+    // KOUVENTA
     if (bot.kouventaConfig?.enabled) {
         console.log(`🤖 Using KOUVENTA for bot: ${bot.name}`);
-        
-        const kvService = new KouventaService(
-            bot.kouventaConfig.apiKey, 
-            bot.kouventaConfig.endpoint // URL FULL
-        );
-
-        // ✅ GABUNGKAN PESAN + FILE JADI SATU STRING PANJANG
+        const kvService = new KouventaService(bot.kouventaConfig.apiKey, bot.kouventaConfig.endpoint);
         let finalMessage = message || "";
         
         if (Array.isArray(userContent)) {
-            // Ambil semua teks dari file extraction
             const fileTexts = userContent
                 .filter(c => c.type === 'text' && c.text !== message) 
                 .map(c => c.text)
                 .join("\n");
-            
-            if (fileTexts) {
-                finalMessage += `\n\n${fileTexts}`;
-            }
+            if (fileTexts) finalMessage += `\n\n${fileTexts}`;
         }
-
         aiResponse = await kvService.generateResponse(finalMessage);
-    
     } 
-    // ✅ OPENAI LOGIC
+    // OPENAI
     else {
         console.log(`🧠 Using OPENAI for bot: ${bot.name}`);
         const messagesPayload = [
@@ -223,7 +219,7 @@ class AICoreService {
         aiResponse = completion.choices[0].message.content;
     }
 
-    // 6. Save & Return
+    // Save & Return
     let savedAttachments = [];
     if (attachedFile) {
         savedAttachments.push({
