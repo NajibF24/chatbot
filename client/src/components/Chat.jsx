@@ -4,18 +4,18 @@ import axios from 'axios';
 const Chat = ({ user, handleLogout }) => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
-  const [history, setHistory] = useState([]); // Riwayat Chat
-  const [bots, setBots] = useState([]);       // Daftar Bot di Sidebar
-  const [selectedBot, setSelectedBot] = useState(null); // Bot yang sedang aktif
-  const [currentChatId, setCurrentChatId] = useState(null);
+  const [threads, setThreads] = useState([]); // Ganti history jadi threads (sesuai server)
+  const [bots, setBots] = useState([]);       
+  const [selectedBot, setSelectedBot] = useState(null); 
+  const [currentThreadId, setCurrentThreadId] = useState(null); // Ganti chatID jadi threadID
   const [loading, setLoading] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Toggle Sidebar di Mobile
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true); 
   const messagesEndRef = useRef(null);
 
-  // --- 1. INITIAL LOAD (Fetch Bots & History) ---
+  // --- 1. INITIAL LOAD ---
   useEffect(() => {
     fetchBots();
-    fetchHistory();
+    fetchThreads();
   }, []);
 
   // Auto-scroll ke bawah saat ada pesan baru
@@ -23,16 +23,14 @@ const Chat = ({ user, handleLogout }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // --- API CALLS ---
+  // --- API CALLS (SESUAI FILE SERVER ANDA) ---
   const fetchBots = async () => {
     try {
-      // Kita panggil endpoint untuk list bot (pastikan user punya akses)
-      // Jika endpoint khusus user belum ada, kita bisa pakai admin route atau buat baru
-      // Disini saya asumsi user bisa baca list bot
-      const res = await axios.get('/api/admin/bots'); 
+      // ✅ FIX: Gunakan endpoint /api/chat/bots (bukan admin)
+      const res = await axios.get('/api/chat/bots'); 
       setBots(res.data);
       
-      // Set default bot jika ada
+      // Set default bot
       if (res.data.length > 0 && !selectedBot) {
         setSelectedBot(res.data[0]); 
       }
@@ -41,44 +39,49 @@ const Chat = ({ user, handleLogout }) => {
     }
   };
 
-  const fetchHistory = async () => {
+  const fetchThreads = async () => {
     try {
-      const res = await axios.get('/api/chat/history');
-      setHistory(res.data);
+      // ✅ FIX: Endpoint server Anda adalah /api/chat/threads
+      const res = await axios.get('/api/chat/threads');
+      setThreads(res.data);
     } catch (error) {
-      console.error("Error fetching history:", error);
+      console.error("Error fetching threads:", error);
     }
   };
 
   // --- ACTIONS ---
 
-  // A. Ganti Bot dari Sidebar (Start New Chat dengan Bot tertentu)
+  // A. Ganti Bot dari Sidebar
   const handleBotSelect = (bot) => {
     setSelectedBot(bot);
-    setMessages([]); // Kosongkan layar chat
-    setCurrentChatId(null); // Reset ID chat karena ini sesi baru
-    
-    // Optional: Auto mobile sidebar close
+    setMessages([]); // Reset layar chat
+    setCurrentThreadId(null); // Reset ID thread
     if (window.innerWidth < 1024) setIsSidebarOpen(false);
   };
 
-  // B. Buka Riwayat Chat (Load Old Chat)
-  const loadChat = async (chatId) => {
+  // B. Buka Thread Lama
+  const loadThread = async (threadId) => {
     try {
       setLoading(true);
-      const res = await axios.get(`/api/chat/${chatId}`);
+      setCurrentThreadId(threadId);
+
+      // ✅ FIX: Endpoint server Anda adalah /api/chat/thread/:id
+      const res = await axios.get(`/api/chat/thread/${threadId}`);
       
-      // Set messages
-      setMessages(res.data.messages || []);
-      setCurrentChatId(chatId);
+      // Format pesan dari DB agar sesuai UI
+      const formattedMessages = res.data.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
       
-      // Cari bot yang sesuai dengan history ini dan set sebagai aktif
-      const historyBot = bots.find(b => b._id === res.data.botId);
-      if (historyBot) setSelectedBot(historyBot);
+      setMessages(formattedMessages);
+      
+      // Cari bot yang sesuai thread ini (opsional, jika data ada)
+      // Note: Idealnya endpoint thread mengembalikan botId juga
       
       if (window.innerWidth < 1024) setIsSidebarOpen(false);
     } catch (error) {
-      console.error("Error loading chat:", error);
+      console.error("Error loading thread:", error);
     } finally {
       setLoading(false);
     }
@@ -95,22 +98,21 @@ const Chat = ({ user, handleLogout }) => {
     setLoading(true);
 
     try {
-      // Kirim ke backend
+      // ✅ FIX: Payload disesuaikan dengan server/routes/chat.js
       const res = await axios.post('/api/chat/message', {
-        message: input,
+        message: userMessage.content,
         botId: selectedBot._id,
-        chatId: currentChatId 
+        threadId: currentThreadId // Kirim null jika chat baru
       });
 
-      // Tambahkan balasan bot ke UI
+      // Tambahkan balasan bot
       const botMessage = { role: 'assistant', content: res.data.reply };
       setMessages(prev => [...prev, botMessage]);
 
-      // Jika ini chat baru, simpan ID nya agar chat selanjutnya nyambung
-      if (res.data.chatId) {
-        setCurrentChatId(res.data.chatId);
-        // Refresh history agar chat baru muncul di sidebar list
-        if (!currentChatId) fetchHistory(); 
+      // Update Thread ID jika ini chat baru
+      if (res.data.threadId) {
+        setCurrentThreadId(res.data.threadId);
+        fetchThreads(); // Refresh sidebar history
       }
 
     } catch (error) {
@@ -121,11 +123,9 @@ const Chat = ({ user, handleLogout }) => {
     }
   };
 
-  // D. Reset / New Chat General
   const handleNewChat = () => {
     setMessages([]);
-    setCurrentChatId(null);
-    // Kita tetap pertahankan selectedBot terakhir
+    setCurrentThreadId(null);
   };
 
   return (
@@ -153,7 +153,6 @@ const Chat = ({ user, handleLogout }) => {
                </div>
              </div>
           </div>
-          {/* Close Sidebar Mobile */}
           <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden text-gray-400 hover:text-white">
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
@@ -176,11 +175,10 @@ const Chat = ({ user, handleLogout }) => {
                       : 'hover:bg-white/5 text-gray-400 hover:text-white border border-transparent'
                   }`}
                 >
-                  {/* Bot Icon Placeholder */}
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
                      selectedBot?._id === bot._id ? 'bg-cyan-500 text-black' : 'bg-gray-800 text-gray-400 group-hover:bg-gray-700'
                   }`}>
-                    {bot.name.substring(0, 2).toUpperCase()}
+                    {bot.name ? bot.name.substring(0, 2).toUpperCase() : 'AI'}
                   </div>
                   <div className="flex-1 truncate">
                     <div className="font-medium text-sm truncate">{bot.name}</div>
@@ -194,7 +192,7 @@ const Chat = ({ user, handleLogout }) => {
             </div>
           </div>
 
-          {/* Section 2: HISTORY */}
+          {/* Section 2: HISTORY (THREADS) */}
           <div>
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 px-2 mt-4">History</h3>
             <div className="space-y-1">
@@ -206,22 +204,22 @@ const Chat = ({ user, handleLogout }) => {
                  <span className="text-sm font-medium">New Conversation</span>
               </button>
 
-              {history.length === 0 && (
+              {threads.length === 0 && (
                 <p className="text-xs text-gray-600 px-3 italic">No recent history.</p>
               )}
 
-              {history.map((chat) => (
+              {threads.map((t) => (
                 <button
-                  key={chat._id}
-                  onClick={() => loadChat(chat._id)}
+                  key={t._id}
+                  onClick={() => loadThread(t._id)}
                   className={`w-full text-left px-3 py-2 rounded-lg text-sm truncate transition-colors flex items-center gap-2 ${
-                    currentChatId === chat._id 
+                    currentThreadId === t._id 
                     ? 'bg-white/10 text-white' 
                     : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'
                   }`}
                 >
                   <svg className="w-4 h-4 opacity-50 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-                  <span className="truncate">{chat.title || "Untitled Chat"}</span>
+                  <span className="truncate">{t.botId?.name || "Chat"} - {new Date(t.lastMessageAt).toLocaleDateString()}</span>
                 </button>
               ))}
             </div>
@@ -235,7 +233,7 @@ const Chat = ({ user, handleLogout }) => {
                 {user?.username?.substring(0,2).toUpperCase() || 'US'}
              </div>
              <div className="flex-1 overflow-hidden">
-               <p className="text-sm font-medium text-white truncate">{user?.username}</p>
+               <p className="text-sm font-medium text-white truncate">{user?.username || 'User'}</p>
                <button onClick={handleLogout} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors">
                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                  Sign Out
@@ -262,7 +260,7 @@ const Chat = ({ user, handleLogout }) => {
         {/* Chat Messages */}
         <div className="flex-1 overflow-y-auto p-4 lg:p-10 space-y-6 custom-scrollbar scroll-smooth">
           {messages.length === 0 ? (
-            // EMPTY STATE (Welcome Screen)
+            // EMPTY STATE
             <div className="h-full flex flex-col items-center justify-center text-center opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]">
               <div className="w-20 h-20 bg-gradient-to-br from-gray-800 to-black rounded-2xl flex items-center justify-center mb-6 shadow-2xl border border-white/10 relative group">
                  <div className="absolute inset-0 bg-cyan-500/20 blur-xl group-hover:bg-cyan-500/30 transition-all duration-500 rounded-2xl"></div>
@@ -275,7 +273,7 @@ const Chat = ({ user, handleLogout }) => {
                 {selectedBot?.description || "Choose an AI agent from the sidebar to begin your session."}
               </p>
               
-              {/* Quick Prompts (Contoh) */}
+              {/* Quick Prompts (Jika bot dipilih) */}
               {selectedBot && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
                    {["Analyze current data", "Draft a report", "Search knowledge base", "System status check"].map((txt, i) => (
@@ -299,17 +297,12 @@ const Chat = ({ user, handleLogout }) => {
                     ? 'bg-gradient-to-r from-cyan-700 to-blue-700 text-white rounded-tr-sm' 
                     : 'bg-[#1a2035] border border-white/5 text-gray-200 rounded-tl-sm'
                 }`}>
-                  {/* Glowing line for AI messages */}
                   {msg.role === 'assistant' && (
                      <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500/50"></div>
                   )}
-                  
-                  {/* Markdown or Plain Text */}
                   <div className="prose prose-invert max-w-none text-sm lg:text-base leading-relaxed whitespace-pre-wrap font-light">
                     {msg.content}
                   </div>
-                  
-                  {/* Timestamp / Role Label */}
                   <div className={`text-[10px] mt-2 font-mono uppercase tracking-widest opacity-40 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
                     {msg.role === 'user' ? 'You' : selectedBot?.name || 'System'}
                   </div>
@@ -352,11 +345,6 @@ const Chat = ({ user, handleLogout }) => {
                 </svg>
               </button>
             </div>
-            {!selectedBot && (
-               <div className="absolute -top-10 left-0 text-red-400 text-xs animate-pulse">
-                 * Please select an agent from the sidebar first
-               </div>
-            )}
           </form>
           <div className="text-center mt-3">
              <p className="text-[10px] text-gray-600 font-mono">
