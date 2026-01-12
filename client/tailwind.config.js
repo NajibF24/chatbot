@@ -6,7 +6,7 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Garuda Yamato Steel Green Theme
+        // --- EXISTING THEME (Hijau) ---
         primary: {
           50: '#f0fdf4',
           100: '#dcfce7',
@@ -19,6 +19,7 @@ module.exports = {
           800: '#166534',
           900: '#14532d',
         },
+        // --- EXISTING NEUTRAL (Steel/Gray) ---
         steel: {
           50: '#f8fafc',
           100: '#f1f5f9',
@@ -30,8 +31,19 @@ module.exports = {
           700: '#334155',
           800: '#1e293b',
           900: '#0f172a',
+        },
+        // --- NEW BRANDING (Navy & Red GYS) ---
+        gys: {
+          navy: '#002561', // Biru gelap khas korporat/baja
+          red: '#C1272D',  // Merah tegas untuk aksen/tombol
+          steel: '#64748B', // Abu-abu metalik (opsional, mirip steel-500)
+          light: '#F8FAFC', // Background sangat muda
         }
       },
+      // Tambahan Font agar desain Login lebih modern (mirip Dribbble)
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      }
     },
   },
   plugins: [],
