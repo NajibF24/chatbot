@@ -10,107 +10,156 @@ const Login = () => {
   const handleLogin = (e) => {
     e.preventDefault();
     setLoading(true);
-    // Simulasi login (ganti dengan logic API Anda nanti)
+    // Simulate API call for LDAP Login
     setTimeout(() => {
       setLoading(false);
-      navigate('/dashboard'); // Sesuaikan dengan route dashboard Anda
+      navigate('/dashboard');
     }, 1500);
   };
 
   return (
-    <div className="min-h-screen flex w-full bg-gys-light">
+    <div className="min-h-screen flex w-full bg-[#0a0f1c] text-white font-sans overflow-hidden relative">
       
-      {/* BAGIAN KIRI - Visual & Branding GYS */}
-      <div className="hidden lg:flex w-1/2 bg-gys-navy relative overflow-hidden items-center justify-center">
-        {/* Background Pattern / Overlay */}
-        <div className="absolute inset-0 opacity-20 bg-[url('https://images.unsplash.com/photo-1504917595217-d4dc5ebe6122?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center mix-blend-overlay"></div>
-        <div className="absolute inset-0 bg-gradient-to-br from-gys-navy via-gys-navy to-black opacity-90"></div>
+      {/* BACKGROUND EFFECTS (Tech Atmosphere) */}
+      <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0">
+         {/* Gradient Orb 1 */}
+        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-gys-navy opacity-20 blur-[120px]"></div>
+        {/* Gradient Orb 2 */}
+        <div className="absolute bottom-[10%] right-[10%] w-[40%] h-[40%] rounded-full bg-cyan-900 opacity-20 blur-[100px]"></div>
+        {/* Grid Pattern Overlay */}
+        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
+      </div>
 
-        <div className="relative z-10 text-white px-12 text-center">
+      {/* LEFT SIDE - Holographic/Tech Visual */}
+      <div className="hidden lg:flex w-1/2 relative z-10 flex-col justify-between p-16 border-r border-white/5 bg-white/5 backdrop-blur-sm">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
+            <span className="text-cyan-400 text-xs tracking-[0.2em] font-bold uppercase">System Operational</span>
+          </div>
           <img 
             src="/assets/favicon_gys.ico" 
             alt="GYS Logo" 
-            className="w-24 h-24 mx-auto mb-8 drop-shadow-lg"
+            className="w-16 h-16 drop-shadow-[0_0_15px_rgba(0,180,255,0.5)]"
           />
-          <h1 className="text-4xl font-bold mb-4 tracking-wide">Garuda Yamato Steel</h1>
-          <p className="text-gys-steel text-lg font-light max-w-md mx-auto leading-relaxed">
-            Portal AI & Manajemen Terintegrasi. <br/>
-            Membangun masa depan dengan inovasi baja berkualitas.
+        </div>
+
+        <div className="relative">
+          <h1 className="text-6xl font-bold mb-6 leading-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-gray-200 to-gray-500">
+            Future <br/>
+            Intelligence.
+          </h1>
+          <p className="text-gray-400 text-lg max-w-md border-l-2 border-cyan-500 pl-6">
+            Integrated AI Portal for Garuda Yamato Steel. <br/>
+            Optimizing operations through advanced machine learning & real-time analytics.
           </p>
         </div>
-        
-        {/* Dekorasi Artistik (Garis Baja) */}
-        <div className="absolute bottom-0 left-0 w-full h-2 bg-gys-red"></div>
+
+        <div className="flex gap-4 text-xs text-gray-500 font-mono">
+          <p>ID: GYS-AI-2026</p>
+          <p>Ver: 2.4.0 (Stable)</p>
+        </div>
       </div>
 
-      {/* BAGIAN KANAN - Form Login Modern */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 lg:p-16 relative">
+      {/* RIGHT SIDE - Cyber Form */}
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 z-20 relative">
         <div className="w-full max-w-md">
           
-          {/* Header Mobile (Hanya muncul di HP) */}
-          <div className="lg:hidden text-center mb-10">
-            <img src="/assets/favicon_gys.ico" alt="Logo" className="w-16 h-16 mx-auto mb-4"/>
-            <h2 className="text-2xl font-bold text-gys-navy">Garuda Yamato Steel</h2>
+          {/* Header Mobile */}
+          <div className="lg:hidden mb-8 text-center">
+            <img src="/assets/favicon_gys.ico" alt="Logo" className="w-12 h-12 mx-auto mb-4"/>
+            <h2 className="text-xl font-bold tracking-widest text-white">PORTAL AI</h2>
           </div>
 
-          <div className="mb-10">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">Selamat Datang</h2>
-            <p className="text-gray-500">Silakan masuk ke akun Portal AI Anda.</p>
+          <div className="bg-white/5 border border-white/10 p-8 rounded-2xl backdrop-blur-xl shadow-2xl">
+            <div className="mb-8">
+              <h2 className="text-3xl font-bold text-white mb-2">Welcome Back</h2>
+              <p className="text-gray-400 text-sm">Enter your Enterprise credentials to access the neural network.</p>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-6">
+              
+              {/* Email Input */}
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wider text-cyan-400 font-semibold ml-1">Enterprise ID / Email</label>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+                    </svg>
+                  </div>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full pl-12 pr-4 py-3 bg-black/40 border border-white/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 transition-all duration-300"
+                    placeholder="name@garudayamatosteel.com"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Password Input */}
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wider text-cyan-400 font-semibold ml-1">Access Key</label>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                  </div>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full pl-12 pr-4 py-3 bg-black/40 border border-white/10 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 transition-all duration-300"
+                    placeholder="••••••••"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Checkbox Only - No Forgot Password */}
+              <div className="flex items-center text-sm">
+                <label className="flex items-center text-gray-400 cursor-pointer hover:text-white transition-colors">
+                  <input type="checkbox" className="form-checkbox h-4 w-4 text-cyan-500 rounded border-gray-600 bg-gray-800 focus:ring-offset-gray-900" />
+                  <span className="ml-2">Remember device</span>
+                </label>
+              </div>
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full relative overflow-hidden group bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 text-white font-bold py-4 rounded-lg transition-all duration-300 shadow-[0_0_20px_rgba(6,182,212,0.3)] hover:shadow-[0_0_30px_rgba(6,182,212,0.5)]"
+              >
+                <div className="relative z-10 flex items-center justify-center gap-2">
+                  {loading ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>AUTHENTICATING...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>INITIALIZE SESSION</span>
+                      <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                      </svg>
+                    </>
+                  )}
+                </div>
+              </button>
+            </form>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-6">
-            
-            {/* Input Email */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Email Perusahaan</label>
-              <div className="relative">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-4 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gys-navy/20 focus:border-gys-navy transition-all duration-200"
-                  placeholder="nama@garudayamatosteel.com"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Input Password */}
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <label className="block text-sm font-medium text-gray-700">Password</label>
-                <a href="#" className="text-sm text-gys-red hover:underline font-medium">Lupa password?</a>
-              </div>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gys-navy/20 focus:border-gys-navy transition-all duration-200"
-                placeholder="••••••••"
-                required
-              />
-            </div>
-
-            {/* Tombol Login */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-gys-navy hover:bg-[#001b4d] text-white font-semibold py-3.5 rounded-xl transition-all duration-300 transform hover:scale-[1.01] shadow-lg shadow-gys-navy/30 flex justify-center items-center"
-            >
-              {loading ? (
-                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              ) : (
-                "Masuk ke Portal"
-              )}
-            </button>
-          </form>
-
-          {/* Footer Kecil */}
-          <div className="mt-10 text-center text-xs text-gray-400">
-            &copy; 2026 PT Garuda Yamato Steel. All rights reserved.
+          <div className="mt-8 text-center">
+            <p className="text-gray-600 text-xs">
+              Restricted Access. Authorized Personnel Only.<br/>
+              &copy; 2026 PT Garuda Yamato Steel. All systems operational.
+            </p>
           </div>
         </div>
       </div>
