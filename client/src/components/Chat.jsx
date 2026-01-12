@@ -4,10 +4,16 @@ import axios from 'axios';
 const Chat = ({ user, handleLogout }) => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
-  const [threads, setThreads] = useState([]); // Ganti history jadi threads (sesuai server)
+  
+  // State Data
   const [bots, setBots] = useState([]);       
+  const [threads, setThreads] = useState([]); 
+  
+  // State Selection
   const [selectedBot, setSelectedBot] = useState(null); 
-  const [currentThreadId, setCurrentThreadId] = useState(null); // Ganti chatID jadi threadID
+  const [currentThreadId, setCurrentThreadId] = useState(null); 
+  
+  // State UI
   const [loading, setLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true); 
   const messagesEndRef = useRef(null);
@@ -23,16 +29,17 @@ const Chat = ({ user, handleLogout }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // --- API CALLS (SESUAI FILE SERVER ANDA) ---
+  // --- API CALLS ---
   const fetchBots = async () => {
     try {
-      // ✅ FIX: Gunakan endpoint /api/chat/bots (bukan admin)
       const res = await axios.get('/api/chat/bots'); 
-      setBots(res.data);
+      // Handle format data yang mungkin berbeda (array langsung atau objek {bots: []})
+      const botList = Array.isArray(res.data) ? res.data : (res.data.bots || []);
+      setBots(botList);
       
-      // Set default bot
-      if (res.data.length > 0 && !selectedBot) {
-        setSelectedBot(res.data[0]); 
+      // Auto-select bot pertama jika belum ada yang dipilih
+      if (botList.length > 0 && !selectedBot) {
+        setSelectedBot(botList[0]); 
       }
     } catch (error) {
       console.error("Error fetching bots:", error);
@@ -41,7 +48,6 @@ const Chat = ({ user, handleLogout }) => {
 
   const fetchThreads = async () => {
     try {
-      // ✅ FIX: Endpoint server Anda adalah /api/chat/threads
       const res = await axios.get('/api/chat/threads');
       setThreads(res.data);
     } catch (error) {
@@ -51,21 +57,20 @@ const Chat = ({ user, handleLogout }) => {
 
   // --- ACTIONS ---
 
-  // A. Ganti Bot dari Sidebar
+  // Ganti Bot (Mulai Chat Baru dengan Bot Terpilih)
   const handleBotSelect = (bot) => {
     setSelectedBot(bot);
     setMessages([]); // Reset layar chat
-    setCurrentThreadId(null); // Reset ID thread
+    setCurrentThreadId(null); // Reset ID thread (jadi mode new chat)
     if (window.innerWidth < 1024) setIsSidebarOpen(false);
   };
 
-  // B. Buka Thread Lama
+  // Buka History Chat Lama
   const loadThread = async (threadId) => {
     try {
       setLoading(true);
       setCurrentThreadId(threadId);
 
-      // ✅ FIX: Endpoint server Anda adalah /api/chat/thread/:id
       const res = await axios.get(`/api/chat/thread/${threadId}`);
       
       // Format pesan dari DB agar sesuai UI
@@ -73,12 +78,17 @@ const Chat = ({ user, handleLogout }) => {
         role: msg.role,
         content: msg.content
       }));
-      
       setMessages(formattedMessages);
       
-      // Cari bot yang sesuai thread ini (opsional, jika data ada)
-      // Note: Idealnya endpoint thread mengembalikan botId juga
-      
+      // Sinkronisasi: Cari bot yang dipakai di thread ini dan aktifkan di sidebar
+      // Kita cari di list threads untuk mendapatkan botId-nya
+      const threadInfo = threads.find(t => t._id === threadId);
+      if (threadInfo && threadInfo.botId) {
+          const threadBotId = typeof threadInfo.botId === 'object' ? threadInfo.botId._id : threadInfo.botId;
+          const foundBot = bots.find(b => b._id === threadBotId);
+          if (foundBot) setSelectedBot(foundBot);
+      }
+
       if (window.innerWidth < 1024) setIsSidebarOpen(false);
     } catch (error) {
       console.error("Error loading thread:", error);
@@ -87,7 +97,13 @@ const Chat = ({ user, handleLogout }) => {
     }
   };
 
-  // C. Kirim Pesan
+  const handleNewChat = () => {
+    setMessages([]);
+    setCurrentThreadId(null);
+    // Kita biarkan selectedBot tetap yang terakhir dipilih
+  };
+
+  // --- KIRIM PESAN (LOGIC FIXED) ---
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim() || !selectedBot) return;
@@ -98,128 +114,126 @@ const Chat = ({ user, handleLogout }) => {
     setLoading(true);
 
     try {
-      // ✅ FIX: Payload disesuaikan dengan server/routes/chat.js
-      const res = await axios.post('/api/chat/message', {
+      // Payload sesuai dengan server/services/ai-core.service.js
+      const payload = {
         message: userMessage.content,
         botId: selectedBot._id,
-        threadId: currentThreadId // Kirim null jika chat baru
-      });
+        threadId: currentThreadId, // Kirim null jika chat baru
+        history: messages.map(m => ({ role: m.role, content: m.content })) // Kirim history untuk konteks
+      };
 
-      // Tambahkan balasan bot
-      const botMessage = { role: 'assistant', content: res.data.reply };
+      console.log("📤 Sending:", payload);
+
+      const res = await axios.post('/api/chat/message', payload);
+      console.log("📥 Received:", res.data);
+
+      // ✅ FIX UTAMA: Backend mengirim key 'response', bukan 'reply'
+      const replyText = res.data.response; 
+
+      if (!replyText) {
+         throw new Error("Server response empty (check 'response' field)");
+      }
+
+      const botMessage = { role: 'assistant', content: replyText };
       setMessages(prev => [...prev, botMessage]);
 
-      // Update Thread ID jika ini chat baru
+      // Jika ini chat baru, server akan mengembalikan threadId baru
       if (res.data.threadId) {
         setCurrentThreadId(res.data.threadId);
-        fetchThreads(); // Refresh sidebar history
+        fetchThreads(); // Refresh sidebar history agar muncul judul baru
+      } else {
+        fetchThreads(); // Refresh timestamp history
       }
 
     } catch (error) {
       console.error("Error sending message:", error);
-      setMessages(prev => [...prev, { role: 'assistant', content: "Error: Failed to connect to Neural Core." }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: "Maaf, terjadi kesalahan koneksi ke server AI." }]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleNewChat = () => {
-    setMessages([]);
-    setCurrentThreadId(null);
-  };
-
   return (
-    <div className="flex h-screen bg-[#0a0f1c] text-white font-sans overflow-hidden relative">
+    <div className="flex h-screen bg-slate-900 text-white font-sans overflow-hidden">
       
-      {/* BACKGROUND ACCENTS */}
-      <div className="absolute top-0 left-0 w-full h-full pointer-events-none z-0">
-        <div className="absolute top-[-10%] left-[-10%] w-[30%] h-[30%] rounded-full bg-gys-navy opacity-10 blur-[100px]"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[30%] h-[30%] rounded-full bg-cyan-900 opacity-10 blur-[100px]"></div>
-      </div>
-
       {/* --- SIDEBAR --- */}
       <aside 
-        className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:relative z-30 w-72 h-full bg-[#0d1221] border-r border-white/5 flex flex-col transition-transform duration-300 backdrop-blur-xl shadow-2xl lg:shadow-none`}
+        className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:relative z-30 w-72 h-full bg-slate-800 border-r border-slate-700 flex flex-col transition-transform duration-300 shadow-xl`}
       >
-        {/* Sidebar Header */}
-        <div className="p-6 border-b border-white/5 flex items-center justify-between">
+        {/* Header Sidebar */}
+        <div className="p-5 border-b border-slate-700 flex items-center justify-between bg-slate-800">
           <div className="flex items-center gap-3">
-             <img src="/assets/favicon_gys.ico" alt="Logo" className="w-8 h-8 drop-shadow-[0_0_10px_rgba(6,182,212,0.5)]"/>
+             <img src="/assets/favicon_gys.ico" alt="Logo" className="w-8 h-8"/>
              <div>
-               <h1 className="font-bold tracking-wider text-lg text-white">PORTAL AI</h1>
-               <div className="flex items-center gap-1">
-                 <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></div>
-                 <span className="text-[10px] text-cyan-500 uppercase tracking-widest">Online</span>
+               <h1 className="font-bold text-lg text-white tracking-wide">PORTAL AI</h1>
+               <div className="flex items-center gap-1.5">
+                 <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                 <span className="text-[11px] text-green-400 font-medium">System Online</span>
                </div>
              </div>
           </div>
-          <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden text-gray-400 hover:text-white">
+          <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden text-slate-400 hover:text-white">
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
-        {/* Scrollable Area */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+        {/* List Bot & History */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-thin scrollbar-thumb-slate-600">
           
           {/* Section 1: AGENTS (BOTS) */}
           <div>
-            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 px-2">Select Agent</h3>
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 px-2">Select Assistant</h3>
             <div className="space-y-1">
               {bots.map((bot) => (
                 <button
                   key={bot._id}
                   onClick={() => handleBotSelect(bot)}
-                  className={`w-full text-left px-3 py-3 rounded-lg flex items-center gap-3 transition-all duration-200 group ${
+                  className={`w-full text-left px-3 py-3 rounded-lg flex items-center gap-3 transition-all duration-200 ${
                     selectedBot?._id === bot._id 
-                      ? 'bg-cyan-900/20 border border-cyan-500/30 text-white shadow-[0_0_15px_rgba(6,182,212,0.1)]' 
-                      : 'hover:bg-white/5 text-gray-400 hover:text-white border border-transparent'
+                      ? 'bg-blue-600 text-white shadow-lg' 
+                      : 'hover:bg-slate-700 text-slate-300 hover:text-white'
                   }`}
                 >
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                     selectedBot?._id === bot._id ? 'bg-cyan-500 text-black' : 'bg-gray-800 text-gray-400 group-hover:bg-gray-700'
+                  <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${
+                     selectedBot?._id === bot._id ? 'bg-white text-blue-700' : 'bg-slate-700 text-slate-300'
                   }`}>
                     {bot.name ? bot.name.substring(0, 2).toUpperCase() : 'AI'}
                   </div>
                   <div className="flex-1 truncate">
-                    <div className="font-medium text-sm truncate">{bot.name}</div>
-                    <div className="text-[10px] opacity-60 truncate">{bot.description || "AI Assistant"}</div>
+                    <div className="font-semibold text-sm truncate">{bot.name}</div>
+                    <div className="text-[11px] opacity-70 truncate">{bot.description || "AI Assistant"}</div>
                   </div>
-                  {selectedBot?._id === bot._id && (
-                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></div>
-                  )}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Section 2: HISTORY (THREADS) */}
+          {/* Section 2: HISTORY */}
           <div>
-            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 px-2 mt-4">History</h3>
-            <div className="space-y-1">
-              <button 
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 px-2 mt-4">History</h3>
+            <button 
                  onClick={handleNewChat}
-                 className="w-full text-left px-3 py-2 rounded-lg flex items-center gap-3 text-cyan-400 hover:bg-cyan-900/10 hover:text-cyan-300 transition-colors border border-dashed border-cyan-900/50 hover:border-cyan-500/50 mb-2"
+                 className="w-full text-left px-3 py-2.5 rounded-lg flex items-center gap-3 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 transition-colors border border-dashed border-blue-500/30 mb-3"
               >
                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                  <span className="text-sm font-medium">New Conversation</span>
-              </button>
+            </button>
 
-              {threads.length === 0 && (
-                <p className="text-xs text-gray-600 px-3 italic">No recent history.</p>
-              )}
-
+            <div className="space-y-1">
+              {threads.length === 0 && <p className="text-xs text-slate-500 px-3 italic">No history found.</p>}
+              
               {threads.map((t) => (
                 <button
                   key={t._id}
                   onClick={() => loadThread(t._id)}
                   className={`w-full text-left px-3 py-2 rounded-lg text-sm truncate transition-colors flex items-center gap-2 ${
                     currentThreadId === t._id 
-                    ? 'bg-white/10 text-white' 
-                    : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'
+                    ? 'bg-slate-700 text-white font-medium border-l-2 border-blue-500' 
+                    : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200'
                   }`}
                 >
-                  <svg className="w-4 h-4 opacity-50 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-                  <span className="truncate">{t.botId?.name || "Chat"} - {new Date(t.lastMessageAt).toLocaleDateString()}</span>
+                  <span className="truncate flex-1">{t.title || "Untitled Chat"}</span>
+                  <span className="text-[10px] opacity-40">{new Date(t.lastMessageAt).getDate()}/{new Date(t.lastMessageAt).getMonth()+1}</span>
                 </button>
               ))}
             </div>
@@ -227,60 +241,58 @@ const Chat = ({ user, handleLogout }) => {
         </div>
 
         {/* User Footer */}
-        <div className="p-4 border-t border-white/5 bg-[#0a0f1c]/50">
-          <div className="flex items-center gap-3">
-             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-gys-red to-pink-600 flex items-center justify-center text-white font-bold text-xs shadow-lg">
+        <div className="p-4 border-t border-slate-700 bg-slate-800">
+           <div className="flex items-center gap-3">
+             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shadow-md">
                 {user?.username?.substring(0,2).toUpperCase() || 'US'}
              </div>
              <div className="flex-1 overflow-hidden">
-               <p className="text-sm font-medium text-white truncate">{user?.username || 'User'}</p>
-               <button onClick={handleLogout} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors">
-                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+               <p className="text-sm font-semibold text-white truncate">{user?.username || 'User'}</p>
+               <button onClick={handleLogout} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 mt-0.5">
                  Sign Out
                </button>
              </div>
-          </div>
+           </div>
         </div>
       </aside>
 
       {/* --- MAIN CHAT AREA --- */}
-      <main className="flex-1 flex flex-col relative z-10 h-full">
+      <main className="flex-1 flex flex-col h-full relative bg-slate-900">
         
         {/* Mobile Header */}
-        <div className="lg:hidden h-16 border-b border-white/5 flex items-center justify-between px-4 bg-[#0d1221]/80 backdrop-blur-md">
-           <div className="flex items-center gap-2">
-              <img src="/assets/favicon_gys.ico" alt="Logo" className="w-6 h-6"/>
-              <span className="font-bold text-white">Portal AI</span>
-           </div>
-           <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-cyan-500 bg-cyan-900/20 rounded-lg">
+        <div className="lg:hidden h-14 border-b border-slate-700 flex items-center justify-between px-4 bg-slate-800">
+           <span className="font-bold text-white">Portal AI</span>
+           <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-blue-400">
              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
            </button>
         </div>
 
-        {/* Chat Messages */}
-        <div className="flex-1 overflow-y-auto p-4 lg:p-10 space-y-6 custom-scrollbar scroll-smooth">
+        {/* MESSAGE LIST */}
+        <div className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-6 scrollbar-thin scrollbar-thumb-slate-700">
           {messages.length === 0 ? (
-            // EMPTY STATE
-            <div className="h-full flex flex-col items-center justify-center text-center opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]">
-              <div className="w-20 h-20 bg-gradient-to-br from-gray-800 to-black rounded-2xl flex items-center justify-center mb-6 shadow-2xl border border-white/10 relative group">
-                 <div className="absolute inset-0 bg-cyan-500/20 blur-xl group-hover:bg-cyan-500/30 transition-all duration-500 rounded-2xl"></div>
-                 <span className="text-3xl font-bold text-cyan-400">{selectedBot?.name?.substring(0,1) || "A"}</span>
+            // EMPTY STATE (WELCOME)
+            <div className="h-full flex flex-col items-center justify-center text-center opacity-90 pb-20">
+              <div className="w-20 h-20 bg-slate-800 rounded-2xl flex items-center justify-center mb-6 shadow-xl border border-slate-700">
+                 <span className="text-4xl font-bold text-blue-500">{selectedBot?.name?.substring(0,1) || "A"}</span>
               </div>
-              <h2 className="text-3xl font-bold text-white mb-2">
-                {selectedBot ? `Connected to ${selectedBot.name}` : "Select an Agent"}
+              <h2 className="text-2xl font-bold text-white mb-2">
+                {selectedBot ? `Hello, I'm ${selectedBot.name}` : "Select an Agent"}
               </h2>
-              <p className="text-gray-400 max-w-md mx-auto mb-8">
-                {selectedBot?.description || "Choose an AI agent from the sidebar to begin your session."}
+              <p className="text-slate-400 max-w-md mx-auto mb-8">
+                {selectedBot?.description || "Ready to assist you with operations, data, and analysis."}
               </p>
               
-              {/* Quick Prompts (Jika bot dipilih) */}
+              {/* Quick Suggestions (Starter Questions) */}
               {selectedBot && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
-                   {["Analyze current data", "Draft a report", "Search knowledge base", "System status check"].map((txt, i) => (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg">
+                   {(selectedBot.starterQuestions?.length > 0 
+                      ? selectedBot.starterQuestions 
+                      : ["Apa status project saat ini?", "Buatkan draft laporan", "Cari data produksi", "Jelaskan error log"]
+                   ).map((txt, i) => (
                      <button 
                        key={i} 
-                       onClick={() => setInput(txt)}
-                       className="p-4 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-cyan-500/30 rounded-xl text-left text-sm text-gray-300 hover:text-cyan-400 transition-all duration-200"
+                       onClick={() => { setInput(txt); }}
+                       className="p-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-sm text-slate-300 hover:text-blue-400 transition-colors text-left"
                      >
                        {txt}
                      </button>
@@ -289,68 +301,70 @@ const Chat = ({ user, handleLogout }) => {
               )}
             </div>
           ) : (
-            // MESSAGE LIST
+            // CHAT BUBBLES
             messages.map((msg, index) => (
               <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] lg:max-w-[70%] rounded-2xl p-4 lg:p-6 shadow-lg relative overflow-hidden ${
-                  msg.role === 'user' 
-                    ? 'bg-gradient-to-r from-cyan-700 to-blue-700 text-white rounded-tr-sm' 
-                    : 'bg-[#1a2035] border border-white/5 text-gray-200 rounded-tl-sm'
-                }`}>
-                  {msg.role === 'assistant' && (
-                     <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500/50"></div>
-                  )}
-                  <div className="prose prose-invert max-w-none text-sm lg:text-base leading-relaxed whitespace-pre-wrap font-light">
-                    {msg.content}
+                
+                {/* Bot Icon */}
+                {msg.role !== 'user' && (
+                  <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex-shrink-0 flex items-center justify-center mr-3 mt-1 shadow-sm">
+                    <span className="text-xs font-bold text-blue-400">{selectedBot?.name?.substring(0,1) || "A"}</span>
                   </div>
-                  <div className={`text-[10px] mt-2 font-mono uppercase tracking-widest opacity-40 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                    {msg.role === 'user' ? 'You' : selectedBot?.name || 'System'}
+                )}
+
+                {/* Message Box */}
+                <div className={`max-w-[85%] lg:max-w-[70%] rounded-2xl p-4 shadow-md ${
+                  msg.role === 'user' 
+                    ? 'bg-blue-600 text-white rounded-tr-sm' 
+                    : 'bg-slate-700 text-slate-100 rounded-tl-sm border border-slate-600'
+                }`}>
+                  <div className="prose prose-invert max-w-none text-sm leading-relaxed whitespace-pre-wrap">
+                    {msg.content}
                   </div>
                 </div>
               </div>
             ))
           )}
+          
+          {/* Loading Indicator */}
           {loading && (
-             <div className="flex justify-start">
-               <div className="bg-[#1a2035] border border-white/5 rounded-2xl rounded-tl-sm p-4 flex items-center gap-2">
-                 <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce"></div>
-                 <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce delay-100"></div>
-                 <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce delay-200"></div>
+             <div className="flex justify-start ml-11">
+               <div className="bg-slate-700 rounded-xl px-4 py-3 flex items-center gap-2 border border-slate-600">
+                 <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></div>
+                 <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-100"></div>
+                 <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-200"></div>
                </div>
              </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Area */}
-        <div className="p-4 lg:p-6 bg-[#0a0f1c]/80 backdrop-blur-lg border-t border-white/5 relative z-20">
-          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative group">
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl opacity-20 group-focus-within:opacity-100 transition duration-500 blur"></div>
-            <div className="relative flex bg-[#0d1221] rounded-xl overflow-hidden shadow-2xl">
+        {/* INPUT AREA */}
+        <div className="p-4 bg-slate-800 border-t border-slate-700 z-20">
+          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative flex items-center gap-2">
+            <div className="flex-1 relative">
                <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={selectedBot ? `Ask ${selectedBot.name} anything...` : "Select a bot to start..."}
+                placeholder={selectedBot ? `Message ${selectedBot.name}...` : "Select a bot first..."}
                 disabled={!selectedBot || loading}
-                className="flex-1 bg-transparent border-none text-white px-6 py-4 focus:ring-0 focus:outline-none placeholder-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-slate-900 border border-slate-600 text-white px-5 py-3.5 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500 shadow-inner transition-all"
               />
-              <button
+            </div>
+            <button
                 type="submit"
                 disabled={!input.trim() || !selectedBot || loading}
-                className="px-6 text-cyan-500 hover:text-white hover:bg-cyan-600 transition-all duration-200 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-cyan-500"
+                className="p-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 active:scale-95"
               >
-                <svg className="w-6 h-6 rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                <svg className="w-5 h-5 -rotate-90 translate-x-[1px]" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
                 </svg>
               </button>
-            </div>
           </form>
-          <div className="text-center mt-3">
-             <p className="text-[10px] text-gray-600 font-mono">
-               AI System can make mistakes. Verify important information. Restricted Access GYS.
-             </p>
-          </div>
+          <p className="text-center text-[10px] text-slate-500 mt-2 font-mono">
+             GYS Enterprise AI • Internal Use Only
+          </p>
         </div>
       </main>
     </div>
