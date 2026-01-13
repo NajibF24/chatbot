@@ -1,10 +1,10 @@
 import OpenAI from 'openai';
 import pdf from 'pdf-parse';
 import mammoth from 'mammoth';
-import XLSX from 'xlsx'; // Import standar
+import XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
-import officeParser from 'officeparser'; // Import standar
+import officeParser from 'officeparser';
 
 import Chat from '../models/Chat.js';
 import Thread from '../models/Thread.js';
@@ -19,19 +19,20 @@ class AICoreService {
     this.fileManager = new FileManagerService();
   }
 
-  // ✅ KEMBALIKAN FUNGSI INI (Ini yang menyebabkan Error tadi)
+  // ✅ 1. FUNGSI DETEKSI QUERY DATA (PENTING)
   isDataQuery(message) {
     const lowerMsg = (message || '').toLowerCase();
-    // Keyword visual (gambar) - return false agar tidak dianggap query data excel
-    const visualKeywords = ['dashboard', 'gambar', 'image', 'foto', 'screenshot', 'grafik'];
-    if (visualKeywords.some(k => lowerMsg.includes(k))) return false;
+    
+    // Jika user minta gambar/dashboard, return false agar masuk ke logic FileManager
+    const visualKeywords = ['dashboard', 'gambar', 'image', 'foto', 'screenshot', 'show', 'tampilkan', 'lihat'];
+    if (visualKeywords.some(k => lowerMsg.includes(k)) && lowerMsg.includes('dashboard')) return false;
 
-    // Keyword data
-    const dataKeywords = ['berikan', 'tampilkan', 'cari', 'list', 'daftar', 'semua', 'project', 'status', 'progress', 'overdue', 'summary', 'health', 'analisa', 'resume', 'data', 'nilai', 'code', 'coding', 'script', 'excel', 'word', 'pembayaran', 'termin', 'kontrak', 'top', 'rows', 'column', 'missing', 'date'];
+    // Keyword untuk memicu pembacaan data (Smartsheet/Excel)
+    const dataKeywords = ['berikan', 'cari', 'list', 'daftar', 'semua', 'project', 'status', 'progress', 'overdue', 'summary', 'health', 'analisa', 'resume', 'data', 'nilai', 'rows', 'column', 'missing', 'date', 'workstream', 'total', 'berapa'];
     return dataKeywords.some(k => lowerMsg.includes(k));
   }
 
-  // --- 1. UNIVERSAL FILE EXTRACTOR (DEBUG VERSION) ---
+  // ✅ 2. UNIVERSAL FILE EXTRACTOR
   async extractFileContent(attachedFile) {
       if (!attachedFile || !attachedFile.path) return null;
       
@@ -45,28 +46,27 @@ class AICoreService {
       console.log(`📂 [FILE START] Processing: ${originalName} (${mime})`);
 
       try {
-          // A. PDF HANDLING
+          // PDF
           if (mime === 'application/pdf' || ext === '.pdf') {
               const dataBuffer = fs.readFileSync(attachedFile.path);
               const data = await pdf(dataBuffer);
               content = data.text.replace(/\n\s*\n/g, '\n');
               displayType = 'PDF';
           }
-          // B. WORD HANDLING
+          // WORD (.docx)
           else if (ext === '.docx' || mime.includes('word')) {
               try {
                   const result = await mammoth.extractRawText({ path: attachedFile.path });
                   content = result.value;
                   displayType = 'DOCX (Mammoth)';
               } catch (err) {
-                  // Fallback
                   try {
                        content = await officeParser.parseOfficeAsync(attachedFile.path);
                        displayType = 'DOCX (OfficeParser)';
                   } catch (e) { console.error(e); }
               }
           }
-          // C. EXCEL HANDLING
+          // EXCEL (.xlsx)
           else if (ext === '.xlsx' || ext === '.xls' || mime.includes('spreadsheet')) {
               console.log("📊 Reading Excel file...");
               const workbook = XLSX.readFile(attachedFile.path);
@@ -81,7 +81,7 @@ class AICoreService {
                   displayType = `EXCEL (${workbook.SheetNames.length} Sheets)`;
               }
           }
-          // D. POWERPOINT HANDLING (Dengan Debug Log)
+          // POWERPOINT (.pptx)
           else if (ext === '.pptx' || ext === '.ppt' || mime.includes('presentation')) {
               console.log("📽️ Attempting to read PPTX...");
               try {
@@ -89,10 +89,10 @@ class AICoreService {
                   displayType = 'POWERPOINT';
               } catch (err) {
                   console.error("❌ PPT ERROR:", err);
-                  return `[SYSTEM ERROR: Gagal membaca file PPT. Pesan Error: ${err.message}. Pastikan file tidak dikunci/corrupt.]`;
+                  return `[SYSTEM ERROR: Gagal membaca file PPT. Pesan Error: ${err.message}.]`;
               }
           }
-          // E. Text Files
+          // TEXT / CODE
           else {
                const textExts = ['.txt', '.md', '.csv', '.json', '.xml', '.yaml', '.html', '.css', '.js', '.jsx', '.ts', '.py', '.java', '.c', '.cpp', '.sql', '.log', '.env'];
                if (textExts.includes(ext) || mime.startsWith('text/') || mime.includes('json')) {
@@ -101,7 +101,6 @@ class AICoreService {
                }
           }
 
-          // --- LOGIC PENGECEKAN KOSONG ---
           if (content && content.trim().length > 0) {
               if (typeof content === 'object') content = JSON.stringify(content, null, 2);
               const trimmedContent = content.substring(0, CHAR_LIMIT);
@@ -109,7 +108,7 @@ class AICoreService {
               return `\n\n[FILE START: ${originalName} (${displayType})]\n${trimmedContent}\n[FILE END]\n`;
           } else {
               console.warn(`⚠️ [FILE EMPTY] ${originalName} terbaca tapi teks KOSONG.`);
-              return `\n[SYSTEM INFO: File ${originalName} berhasil diupload, TETAPI isinya kosong atau berupa gambar yang tidak mengandung teks. Bot tidak bisa membaca isinya.]\n`;
+              return `\n[SYSTEM INFO: File ${originalName} berhasil diupload, TETAPI isinya kosong atau berupa gambar yang tidak mengandung teks.]\n`;
           }
 
       } catch (e) {
@@ -118,7 +117,7 @@ class AICoreService {
       }
   }
 
-  // --- 2. MAIN PROCESS ---
+  // ✅ 3. MAIN PROCESS
   async processMessage({ userId, botId, message, attachedFile, threadId, history = [] }) {
     const bot = await Bot.findById(botId);
     if (!bot) throw new Error('Bot not found');
@@ -149,48 +148,63 @@ class AICoreService {
         }
     }
 
-    // 3. Logic Smartsheet
-    let contextData = "";
-    if (bot.smartsheetConfig?.enabled) {
-        // Cek file query
-        const isFileReq = this.fileManager.isFileRequest(message || '');
-        if (isFileReq) {
-            const query = this.fileManager.extractFileQuery(message || '');
-            const foundFiles = await this.fileManager.searchFiles(query);
-            if (foundFiles.length > 0) {
-                const reply = this.fileManager.generateSmartDescription(foundFiles, query);
-                const attachments = foundFiles.map(f => ({ name: f.name, path: f.relativePath, type: f.type, size: f.sizeKB }));
-                await new Chat({ userId, botId, threadId, role: 'user', content: message, attachedFiles: [] }).save();
-                await new Chat({ userId, botId, threadId, role: 'assistant', content: reply, attachedFiles: attachments }).save();
-                return { response: reply, threadId, attachedFiles: attachments };
-            }
-        }
-
-        // Cek data query (Smartsheet) - DISINI ERROR SEBELUMNYA KARENA FUNGSI HILANG
-        if (this.isDataQuery(message)) {
-            const apiKey = (bot.smartsheetConfig.apiKey && bot.smartsheetConfig.apiKey.trim() !== '') ? bot.smartsheetConfig.apiKey : process.env.SMARTSHEET_API_KEY;
-            const sheetId = (bot.smartsheetConfig.sheetId && bot.smartsheetConfig.sheetId.trim() !== '') ? bot.smartsheetConfig.sheetId : process.env.SMARTSHEET_PRIMARY_SHEET_ID;
+    // --- A. LOGIC DASHBOARD / LOCAL FILE SEARCH ---
+    // Cek apakah user meminta file/dashboard (Logic FileManager)
+    const isFileReq = this.fileManager.isFileRequest(message || '');
+    
+    if (isFileReq) {
+        const query = this.fileManager.extractFileQuery(message || '');
+        console.log(`🔎 Searching dashboard files for query: "${query}"`);
+        
+        const foundFiles = await this.fileManager.searchFiles(query);
+        
+        if (foundFiles.length > 0) {
+            console.log(`✅ Found ${foundFiles.length} dashboard files.`);
+            const reply = this.fileManager.generateSmartDescription(foundFiles, query);
             
-            if (apiKey && sheetId) {
-                try {
-                    const service = new SmartsheetJSONService();
-                    service.apiKey = apiKey;
-                    const sheetData = await service.getData(sheetId, message.includes('refresh'));
-                    const rawContext = service.formatForAI(sheetData);
-                    contextData = `\n\n=== SMARTSHEET DATA ===\n${rawContext}\n=== END DATA ===\n`;
-                } catch (e) { console.error("Smartsheet fetch error", e); }
-            }
+            // Format attachment agar bisa dirender Frontend
+            const attachments = foundFiles.map(f => ({ 
+                name: f.name, 
+                path: f.relativePath, // Path ini yang dipakai frontend untuk <img src="...">
+                type: f.type, 
+                size: f.sizeKB 
+            }));
+
+            // Simpan Chat & Return Langsung (Skip OpenAI)
+            await new Chat({ userId, botId, threadId, role: 'user', content: message, attachedFiles: [] }).save();
+            await new Chat({ userId, botId, threadId, role: 'assistant', content: reply, attachedFiles: attachments }).save();
+            
+            return { response: reply, threadId, attachedFiles: attachments };
+        } else {
+            console.log("⚠️ No dashboard files found. Fallback to AI.");
         }
     }
 
-    // 4. Construct System Prompt
+    // --- B. LOGIC SMARTSHEET ---
+    let contextData = "";
+    if (this.isDataQuery(message) && bot.smartsheetConfig?.enabled) {
+        const apiKey = (bot.smartsheetConfig.apiKey && bot.smartsheetConfig.apiKey.trim() !== '') ? bot.smartsheetConfig.apiKey : process.env.SMARTSHEET_API_KEY;
+        const sheetId = (bot.smartsheetConfig.sheetId && bot.smartsheetConfig.sheetId.trim() !== '') ? bot.smartsheetConfig.sheetId : process.env.SMARTSHEET_PRIMARY_SHEET_ID;
+        
+        if (apiKey && sheetId) {
+            try {
+                const service = new SmartsheetJSONService();
+                service.apiKey = apiKey;
+                const sheetData = await service.getData(sheetId, message.includes('refresh'));
+                const rawContext = service.formatForAI(sheetData);
+                contextData = `\n\n=== SMARTSHEET DATA ===\n${rawContext}\n=== END DATA ===\n`;
+            } catch (e) { console.error("Smartsheet fetch error", e); }
+        }
+    }
+
+    // --- C. SYSTEM PROMPT ---
     let systemPrompt = bot.systemPrompt || "Anda adalah asisten AI.";
     if (contextData) {
         if (systemPrompt.includes('{{CONTEXT}}')) systemPrompt = systemPrompt.replace('{{CONTEXT}}', contextData);
         else systemPrompt += `\n\n${contextData}`;
     }
 
-    // 5. AI EXECUTION
+    // --- D. AI EXECUTION ---
     let aiResponse = "";
     
     // KOUVENTA LOGIC
@@ -225,7 +239,7 @@ class AICoreService {
         aiResponse = completion.choices[0].message.content;
     }
 
-    // 6. Save & Return
+    // --- E. SAVE & RETURN ---
     let savedAttachments = [];
     if (attachedFile) {
         savedAttachments.push({
