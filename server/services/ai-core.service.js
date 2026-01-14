@@ -19,20 +19,28 @@ class AICoreService {
     this.fileManager = new FileManagerService();
   }
 
-  // ✅ 1. FUNGSI DETEKSI QUERY DATA
+  // ===========================================================================
+  // 1. UTILS: DETEKSI JENIS QUERY
+  // ===========================================================================
   isDataQuery(message) {
     const lowerMsg = (message || '').toLowerCase();
     
-    // Jika user minta gambar/dashboard, return false agar masuk ke logic FileManager
-    const visualKeywords = ['dashboard', 'gambar', 'image', 'foto', 'screenshot', 'show', 'tampilkan', 'lihat'];
+    // Jika user minta gambar dashboard/screenshot -> Masuk ke File Manager
+    const visualKeywords = ['dashboard', 'gambar', 'image', 'foto', 'screenshot', 'show', 'tampilkan', 'lihat', 'visual'];
     if (visualKeywords.some(k => lowerMsg.includes(k)) && lowerMsg.includes('dashboard')) return false;
 
-    // Keyword untuk memicu pembacaan data (Smartsheet/Excel)
-    const dataKeywords = ['berikan', 'cari', 'list', 'daftar', 'semua', 'project', 'status', 'progress', 'overdue', 'summary', 'health', 'analisa', 'resume', 'data', 'nilai', 'rows', 'column', 'missing', 'date', 'workstream', 'total', 'berapa', 'mana', 'versi', 'latest', 'terbaru'];
+    // Keyword untuk memicu pembacaan data Smartsheet
+    const dataKeywords = [
+        'berikan', 'cari', 'list', 'daftar', 'semua', 'project', 'status', 'progress', 
+        'summary', 'analisa', 'data', 'total', 'berapa', 'mana', 'versi', 'latest', 
+        'terbaru', 'revisi', 'dokumen', 'file', 'tracking', 'update'
+    ];
     return dataKeywords.some(k => lowerMsg.includes(k));
   }
 
-  // ✅ 2. UNIVERSAL FILE EXTRACTOR (Tidak Diubah - Tetap Sama)
+  // ===========================================================================
+  // 2. UTILS: EKSTRAKSI FILE (PDF, WORD, EXCEL)
+  // ===========================================================================
   async extractFileContent(attachedFile) {
       if (!attachedFile || !attachedFile.path) return null;
       
@@ -46,14 +54,14 @@ class AICoreService {
       console.log(`📂 [FILE START] Processing: ${originalName} (${mime})`);
 
       try {
-          // PDF
+          // A. PDF
           if (mime === 'application/pdf' || ext === '.pdf') {
               const dataBuffer = fs.readFileSync(attachedFile.path);
               const data = await pdf(dataBuffer);
               content = data.text.replace(/\n\s*\n/g, '\n');
               displayType = 'PDF';
           }
-          // WORD (.docx)
+          // B. WORD (.docx)
           else if (ext === '.docx' || mime.includes('word')) {
               try {
                   const result = await mammoth.extractRawText({ path: attachedFile.path });
@@ -66,7 +74,7 @@ class AICoreService {
                   } catch (e) { console.error(e); }
               }
           }
-          // EXCEL (.xlsx)
+          // C. EXCEL (.xlsx)
           else if (ext === '.xlsx' || ext === '.xls' || mime.includes('spreadsheet')) {
               console.log("📊 Reading Excel file...");
               const workbook = XLSX.readFile(attachedFile.path);
@@ -81,27 +89,16 @@ class AICoreService {
                   displayType = `EXCEL (${workbook.SheetNames.length} Sheets)`;
               }
           }
-          // POWERPOINT (.pptx)
-          else if (ext === '.pptx' || ext === '.ppt' || mime.includes('presentation')) {
-              try {
-                  content = await officeParser.parseOfficeAsync(attachedFile.path, { outputErrorToConsole: true });
-                  displayType = 'POWERPOINT';
-              } catch (err) {
-                  return `[SYSTEM ERROR: Gagal membaca file PPT. ${err.message}.]`;
-              }
-          }
-          // TEXT / CODE
+          // D. TEXT / CODE
           else {
-               const textExts = ['.txt', '.md', '.csv', '.json', '.xml', '.yaml', '.html', '.css', '.js', '.jsx', '.ts', '.py', '.java', '.c', '.sql', '.env'];
-               if (textExts.includes(ext) || mime.startsWith('text/') || mime.includes('json')) {
-                   content = fs.readFileSync(attachedFile.path, 'utf8');
-                   displayType = 'CODE/TEXT';
-               }
+               content = fs.readFileSync(attachedFile.path, 'utf8');
+               displayType = 'CODE/TEXT';
           }
 
           if (content && content.trim().length > 0) {
               if (typeof content === 'object') content = JSON.stringify(content, null, 2);
               const trimmedContent = content.substring(0, CHAR_LIMIT);
+              console.log(`✅ [FILE SUCCESS] Length: ${trimmedContent.length}`);
               return `\n\n[FILE START: ${originalName} (${displayType})]\n${trimmedContent}\n[FILE END]\n`;
           } else {
               return `\n[SYSTEM INFO: File ${originalName} kosong atau tidak terbaca.]\n`;
@@ -109,17 +106,73 @@ class AICoreService {
 
       } catch (e) {
           console.error(`❌ [FILE ERROR] ${originalName}:`, e);
-          return `\n[SYSTEM ERROR: Gagal membaca file ${originalName}. ${e.message}]`;
+          return `\n[SYSTEM ERROR: Gagal membaca file. ${e.message}]`;
       }
   }
 
-  // ✅ 3. MAIN PROCESS
+  // ===========================================================================
+  // 3. CORE: SMART FILTERING (SOLUSI MASALAH "GARUBEKA")
+  // ===========================================================================
+  filterRelevantData(sheetData, userMessage) {
+    // Cek struktur data
+    let items = [];
+    let dataContainer = null; // Menyimpan apakah data ada di dalam properti 'projects', 'rows', atau array langsung
+
+    if (Array.isArray(sheetData)) {
+        items = sheetData;
+    } else if (sheetData && Array.isArray(sheetData.projects)) {
+        items = sheetData.projects;
+        dataContainer = 'projects';
+    } else if (sheetData && Array.isArray(sheetData.rows)) {
+        items = sheetData.rows;
+        dataContainer = 'rows';
+    } else {
+        // Jika struktur tidak dikenali, kembalikan apa adanya (biar tidak error)
+        return sheetData;
+    }
+
+    const query = userMessage.toLowerCase();
+    // Ambil keyword penting (abaikan kata umum)
+    const keywords = query.split(' ').filter(w => w.length > 3 && !['cari', 'tolong', 'minta', 'data', 'file', 'dokumen', 'yang', 'mana', 'adalah', 'untuk', 'pada'].includes(w));
+
+    // KASUS 1: Query terlalu umum ("list semua", "tampilkan data")
+    // Kembalikan 50 baris terbaru saja agar memori AI tidak penuh
+    if (keywords.length === 0 || query.includes('semua') || query.includes('all') || query.includes('list')) {
+        const slicedItems = items.slice(0, 50);
+        return Array.isArray(sheetData) ? slicedItems : { ...sheetData, [dataContainer]: slicedItems };
+    }
+
+    // KASUS 2: Query Spesifik (misal: "Garubeka", "Proposal", "MEC")
+    // Lakukan filtering ketat
+    const filteredItems = items.filter(item => {
+        const itemString = JSON.stringify(item).toLowerCase();
+        // Cek apakah SALAH SATU keyword ada di dalam baris data ini
+        return keywords.some(keyword => itemString.includes(keyword));
+    });
+
+    console.log(`🔍 Smart Filter: Ditemukan ${filteredItems.length} baris relevan untuk keyword "${keywords.join(' ')}"`);
+
+    // Jika hasil filter kosong (mungkin typo), kembalikan fallback (20 data teratas)
+    if (filteredItems.length === 0) {
+        const fallbackItems = items.slice(0, 20);
+        return Array.isArray(sheetData) ? fallbackItems : { ...sheetData, [dataContainer]: fallbackItems };
+    }
+
+    // Jika hasil filter terlalu banyak, batasi 50 teratas agar AI tidak overload
+    const finalItems = filteredItems.slice(0, 50);
+    
+    return Array.isArray(sheetData) ? finalItems : { ...sheetData, [dataContainer]: finalItems };
+  }
+
+  // ===========================================================================
+  // 4. MAIN PROCESS (MESSAGE CONTROLLER)
+  // ===========================================================================
   async processMessage({ userId, botId, message, attachedFile, threadId, history = [] }) {
     // A. Validasi Bot
     const bot = await Bot.findById(botId);
     if (!bot) throw new Error('Bot not found');
 
-    // B. Manage Thread
+    // B. Kelola Thread
     let currentThreadTitle;
     if (!threadId) {
         const title = message ? (message.length > 30 ? message.substring(0, 30) + '...' : message) : `Chat with ${bot.name}`;
@@ -131,7 +184,7 @@ class AICoreService {
         await Thread.findByIdAndUpdate(threadId, { lastMessageAt: new Date() });
     }
 
-    // C. Prepare User Content (Text + Image/File)
+    // C. Siapkan Konten User (Text + Attachment)
     let userContent = [];
     if (message) userContent.push({ type: "text", text: message });
 
@@ -145,8 +198,8 @@ class AICoreService {
         }
     }
 
-    // --- D. LOGIC FILE MANAGER (DASHBOARD SEARCH) ---
-    // (Cek apakah user minta gambar dashboard lokal)
+    // D. LOGIC 1: FILE MANAGER (Dashboard Images)
+    // Cek apakah user minta file dashboard lokal
     const isFileReq = this.fileManager.isFileRequest(message || '');
     if (isFileReq) {
         const query = this.fileManager.extractFileQuery(message || '');
@@ -163,6 +216,7 @@ class AICoreService {
                 size: f.sizeKB 
             }));
 
+            // Save & Return langsung (Skip OpenAI)
             await new Chat({ userId, botId, threadId, role: 'user', content: message, attachedFiles: [] }).save();
             await new Chat({ userId, botId, threadId, role: 'assistant', content: reply, attachedFiles: attachments }).save();
             
@@ -170,107 +224,95 @@ class AICoreService {
         }
     }
 
-    // --- E. LOGIC SMARTSHEET FETCH ---
+    // E. LOGIC 2: SMARTSHEET DATA (DENGAN FILTERING "GARUBEKA")
     let contextData = "";
-    // Cek config: support sheetId (baru) atau primarySheetId (lama)
+    // Support nama field baru (sheetId) dan lama (primarySheetId)
     const targetSheetId = bot.smartsheetConfig?.sheetId || bot.smartsheetConfig?.primarySheetId;
     
     if (this.isDataQuery(message) && bot.smartsheetConfig?.enabled && targetSheetId) {
-        const apiKey = bot.smartsheetConfig.apiKey || process.env.SMARTSHEET_API_KEY;
-        
-        if (apiKey && targetSheetId) {
-            try {
-                const service = new SmartsheetJSONService();
-                service.apiKey = apiKey;
-                const sheetData = await service.getData(targetSheetId, message.toLowerCase().includes('refresh'));
-                
-                // Format data menjadi string context
-                const rawContext = service.formatForAI(sheetData);
-                contextData = rawContext; // Simpan dulu, jangan di-append langsung
-            } catch (e) { 
-                console.error("⚠️ Smartsheet fetch error", e); 
-                contextData = "[SISTEM: Gagal mengambil data real-time Smartsheet.]";
-            }
+        try {
+            const service = new SmartsheetJSONService();
+            // Use Custom API Key if available
+            if (bot.smartsheetConfig.apiKey) service.apiKey = bot.smartsheetConfig.apiKey;
+            
+            // 1. Ambil SEMUA data (Ribuan baris)
+            const fullSheetData = await service.getData(targetSheetId, message.includes('refresh'));
+            
+            // 2. FILTER DATA (CRITICAL STEP)
+            // Hanya ambil baris yang mengandung keyword user (misal "Garubeka")
+            const filteredData = this.filterRelevantData(fullSheetData, message);
+
+            // 3. Format data yang sudah disaring untuk AI
+            const rawContext = service.formatForAI(filteredData);
+            
+            contextData = `\n\n=== DATA TERFILTER DARI SMARTSHEET (Relevansi Tinggi) ===\n${rawContext}\n=== END DATA ===\n`;
+            
+        } catch (e) { 
+            console.error("⚠️ Smartsheet Error:", e); 
+            contextData = "\n[SISTEM: Gagal mengambil data Smartsheet. Jawab berdasarkan pengetahuan umum.]\n";
         }
     }
 
-    // ============================================================
-    // --- F. LOGIC SYSTEM PROMPT (ANTI-TABRAKAN) ---
-    // ============================================================
-    
+    // F. LOGIC 3: SYSTEM PROMPT (ANTI-TABRAKAN)
     let finalSystemPrompt = "";
-
-    // 1. Cek apakah User membuat Custom Prompt di Dashboard?
-    // Kita cek field 'prompt' (baru) atau 'systemPrompt' (lama)
-    // Syarat: Harus cukup panjang (>20 char) dan BUKAN default system ("Anda adalah...")
+    
+    // Cek apakah User mengisi Prompt di Dashboard Admin?
     const userPrompt = bot.prompt || bot.systemPrompt;
-    const isCustom = userPrompt && userPrompt.length > 20 && !userPrompt.includes("Anda adalah asisten AI profesional yang siap membantu");
+    // Anggap custom jika panjang > 20 dan bukan default text
+    const isCustomPrompt = userPrompt && userPrompt.length > 20 && !userPrompt.includes("Anda adalah asisten AI profesional");
 
-    if (isCustom) {
-        // ✅ KASUS A: CUSTOM BOT (Misal: "BP Revamp Document Controller")
-        // Gunakan prompt user sepenuhnya, lalu tempel data di bawahnya.
-        
+    if (isCustomPrompt) {
+        // ✅ OPSI A: GUNAKAN PROMPT DARI DASHBOARD ADMIN (Prioritas Utama)
+        // Gunakan prompt user mentah-mentah
         finalSystemPrompt = userPrompt;
 
-        // Inject Smartsheet Data jika ada (menggantikan placeholder {{CONTEXT}} atau append di bawah)
+        // Inject Data Smartsheet (jika ada)
         if (contextData) {
+            // Jika user menulis {{CONTEXT}} di prompt, ganti disitu. Jika tidak, tempel di bawah.
             if (finalSystemPrompt.includes('{{CONTEXT}}')) {
-                finalSystemPrompt = finalSystemPrompt.replace('{{CONTEXT}}', `\n\n=== DATA SOURCE ===\n${contextData}\n=== END DATA ===\n`);
+                finalSystemPrompt = finalSystemPrompt.replace('{{CONTEXT}}', contextData);
             } else {
-                finalSystemPrompt += `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📁 DATASET REAL-TIME (DARI SMARTSHEET):\n${contextData}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n(Gunakan data di atas sebagai referensi utama jawaban Anda.)`;
+                finalSystemPrompt += `\n\n${contextData}\n(Gunakan data di atas sebagai referensi utama jawaban Anda.)`;
             }
         }
 
     } else {
-        // ✅ KASUS B: DEFAULT SMART BOT (Project Analyst + Versioning Logic)
-        // Jika user tidak mengisi prompt, gunakan logika CANGGIH ini.
-        
+        // ✅ OPSI B: GUNAKAN DEFAULT SMART BOT (Jika Dashboard Kosong)
         finalSystemPrompt = `Anda adalah ${bot.name}, Asisten Project Management & Document Control Profesional.
 
-${contextData ? `=== AKSES DATA PROYEK REAL-TIME ===\n${contextData}\n====================================` : ''}
+${contextData ? `DATA SUMBER TERFILTER (Relevan dengan pertanyaan):\n${contextData}` : ''}
 
 **PERAN ANDA:**
 1. **Analisis Proyek:** Monitoring status, health, dan progress.
 2. **Document Controller (Cerdas):** Melacak versi dokumen & revisi.
 
 **INSTRUKSI UTAMA:**
-1. **ADAPTASI BAHASA (PENTING):** - Jika user bertanya dalam Bahasa Indonesia, JAWAB dalam Bahasa Indonesia.
-   - If the user asks in English, ANSWER in English.
-   - Jangan mencampur bahasa kecuali untuk istilah teknis.
+1. **BAHASA:** Ikuti bahasa user. Jika tanya Inggris, jawab Inggris. Jika Indo, jawab Indo.
+2. **PENCARIAN DOKUMEN:** - Data di atas sudah difilter berdasarkan kata kunci user (misal "Garubeka").
+   - Lakukan Fuzzy Search pada nama file.
+   - **Logika Versioning:** Urutan Draft < v1 < Rev1 < Rev2 < Final.
+   - Jika tidak ada label, file dengan **TANGGAL TERBARU** adalah **LATEST**.
+3. **OUTPUT:** Selalu sarankan file versi TERBARU (Latest). Tandai file lama sebagai "Outdated".
 
-2. **LOGIKA DETEKSI VERSI DOKUMEN:**
-   Jika user mencari dokumen (misal: "Proposal DevSecOps"):
-   - **Fuzzy Search:** Cari nama file yang MIRIP (contoh: "TechProc_DevSecOps").
-   - **Cek Hierarki Revisi:** Urutan Draft < v1 < Rev1 < Rev2 < Final.
-   - **Keputusan:** Selalu sarankan file versi TERBARU (Latest).
-
-**FORMAT JAWABAN:**
-- Gunakan Markdown (Tabel, Bold) untuk kerapian.
-- Jika data tidak ditemukan di sheet, katakan jujur (jangan halusinasi).
-`;
+**FORMAT:** Gunakan Markdown Table/List yang rapi.`;
     }
 
-    // --- G. AI EXECUTION (OPENAI / KOUVENTA) ---
+    // G. EKSEKUSI AI (OPENAI / KOUVENTA)
     let aiResponse = "";
     
-    // 1. KOUVENTA LOGIC (Jika Enabled)
+    // 1. KOUVENTA
     if (bot.kouventaConfig?.enabled) {
         console.log(`🤖 Using KOUVENTA for bot: ${bot.name}`);
         const kvService = new KouventaService(bot.kouventaConfig.apiKey, bot.kouventaConfig.endpoint);
         
-        // Gabungkan System Prompt + User Message untuk Kouventa
-        let finalMessage = `[SYSTEM INSTRUCTION]\n${finalSystemPrompt}\n\n[USER MESSAGE]\n${message || ""}`;
-
-        if (Array.isArray(userContent)) {
-            const fileTexts = userContent
-                .filter(c => c.type === 'text' && c.text !== message) 
-                .map(c => c.text)
-                .join("\n");
-            if (fileTexts) finalMessage += `\n\n[ATTACHED FILE CONTENT]\n${fileTexts}`;
+        let finalMessage = `[SYSTEM]\n${finalSystemPrompt}\n\n[USER]\n${message || ""}`;
+        if (userContent.length > 1) { // Jika ada file attachment dari user
+             const fileTexts = userContent.filter(c => c.type === 'text' && c.text !== message).map(c => c.text).join("\n");
+             finalMessage += `\n\n[USER ATTACHMENT CONTENT]\n${fileTexts}`;
         }
         aiResponse = await kvService.generateResponse(finalMessage);
     } 
-    // 2. OPENAI LOGIC (Default)
+    // 2. OPENAI (Default)
     else {
         console.log(`🧠 Using OPENAI for bot: ${bot.name}`);
         const messagesPayload = [
@@ -280,14 +322,14 @@ ${contextData ? `=== AKSES DATA PROYEK REAL-TIME ===\n${contextData}\n==========
         ];
 
         const completion = await this.openai.chat.completions.create({
-            model: 'gpt-4o', // Gunakan model terbaik
+            model: 'gpt-4o',
             messages: messagesPayload,
-            temperature: 0.5
+            temperature: 0.3 // Temperature rendah agar lebih akurat membaca data
         });
         aiResponse = completion.choices[0].message.content;
     }
 
-    // --- H. SAVE & RETURN ---
+    // H. SAVE & RETURN
     let savedAttachments = [];
     if (attachedFile) {
         savedAttachments.push({
@@ -298,7 +340,9 @@ ${contextData ? `=== AKSES DATA PROYEK REAL-TIME ===\n${contextData}\n==========
         });
     }
 
+    // Simpan Chat User
     await new Chat({ userId, botId, threadId, role: 'user', content: message || '', attachedFiles: savedAttachments }).save();
+    // Simpan Chat Assistant
     await new Chat({ userId, botId, threadId, role: 'assistant', content: aiResponse, attachedFiles: [] }).save();
 
     return { response: aiResponse, threadId, title: currentThreadTitle, attachedFiles: savedAttachments };
