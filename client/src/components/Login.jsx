@@ -187,7 +187,7 @@ const Login = ({ setUser }) => {
          ========================================= */}
       <div className="hidden lg:block lg:w-1/2 relative h-screen">
         <img 
-            src="/assets/WhatsApp Image 2026-01-14 at 11.13.44.jpeg" 
+            src="/assets/login.jpeg" 
             alt="Garuda Yamato Steel Building"
             className="absolute inset-0 w-full h-full object-cover"
         />
