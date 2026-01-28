@@ -6,6 +6,9 @@ const Login = ({ setUser }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  // STATE BARU: Untuk mengontrol visibilitas Avatar
+  const [isAvatarOpen, setIsAvatarOpen] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -45,12 +48,11 @@ const Login = ({ setUser }) => {
   };
 
   return (
-    <div className="min-h-screen w-full flex bg-[#0a0f1c] font-sans overflow-hidden">
+    <div className="min-h-screen w-full flex bg-[#0a0f1c] font-sans overflow-hidden relative">
       
       {/* =========================================
           BAGIAN KIRI: FORMULIR LOGIN
          ========================================= */}
-      {/* Catatan: border-r dihapus agar menyatu dengan gradasi di kanan */}
       <div className="w-full lg:w-1/2 flex flex-col justify-center items-center p-8 sm:p-12 z-20 relative bg-[#0a0f1c]">
         
         {/* Background Effects (Subtle) */}
@@ -86,7 +88,6 @@ const Login = ({ setUser }) => {
             </div>
 
             <form onSubmit={handleLogin} className="space-y-6">
-              
               {/* Username Input */}
               <div className="space-y-2">
                 <label className="text-xs uppercase tracking-wider text-cyan-400 font-semibold ml-1">Enterprise ID / Username</label>
@@ -192,15 +193,73 @@ const Login = ({ setUser }) => {
             alt="Garuda Yamato Steel Building"
             className="absolute inset-0 w-full h-full object-cover"
         />
-        
-        {/* --- GRADIENT OVERLAY (KUNCI GRADASI) --- 
-            Ini adalah layer di atas gambar yang memiliki warna background kiri 
-            dan memudar ke transparan ke arah kanan. 
-            'from-[#0a0f1c]' = warna background panel kiri.
-        */}
         <div className="absolute top-0 left-0 w-64 h-full bg-gradient-to-r from-[#0a0f1c] via-[#0a0f1c]/70 to-transparent z-10 pointer-events-none"></div>
-
       </div>
+
+      {/* =========================================
+          FLOATING AVATAR WIDGET (ADDITION)
+         ========================================= */}
+      
+      {/* 1. Iframe Container (Popup) */}
+      {isAvatarOpen && (
+        <div className="fixed bottom-24 right-6 z-50 animate-in slide-in-from-bottom-5 duration-300">
+          <div className="bg-[#0a0f1c]/90 border border-cyan-500/30 p-2 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.2)] backdrop-blur-xl w-[350px] sm:w-[400px] h-[500px] flex flex-col relative overflow-hidden">
+             
+             {/* Header kecil di dalam popup */}
+             <div className="flex justify-between items-center px-3 py-2 border-b border-white/10 mb-1">
+                <div className="flex items-center gap-2">
+                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                   <span className="text-cyan-400 text-xs font-bold tracking-widest uppercase">Live Assistant</span>
+                </div>
+                {/* Tombol Close Kecil (Opsional, user bisa klik tombol bulat besar juga) */}
+                <button 
+                  onClick={() => setIsAvatarOpen(false)}
+                  className="text-gray-400 hover:text-white transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+             </div>
+
+             {/* The Iframe */}
+             <iframe 
+                src="https://chat.unith.ai/none-1579/assistit-24328?api_key=abab404e3143433e923c0b016f302081"
+                width="100%" 
+                height="100%" 
+                allow="microphone"
+                title="Digital Receptionist"
+                className="flex-1 rounded-xl border-none bg-white/5"
+             ></iframe>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Floating Toggle Button */}
+      <button
+        onClick={() => setIsAvatarOpen(!isAvatarOpen)}
+        className={`fixed bottom-6 right-6 z-50 w-16 h-16 rounded-full shadow-[0_0_20px_rgba(6,182,212,0.6)] border-2 border-cyan-400/50 flex items-center justify-center transition-all duration-300 hover:scale-110 active:scale-95 ${isAvatarOpen ? 'bg-red-500/80 hover:bg-red-600' : 'bg-cyan-600/80 hover:bg-cyan-500'}`}
+      >
+        {isAvatarOpen ? (
+           // Icon X (Close) saat terbuka
+           <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+           </svg>
+        ) : (
+           // Icon Chat/Avatar saat tertutup
+           <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+           </svg>
+        )}
+        
+        {/* Notification Dot (Hiasan) */}
+        {!isAvatarOpen && (
+          <span className="absolute top-0 right-0 flex h-4 w-4">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500"></span>
+          </span>
+        )}
+      </button>
 
     </div>
   );
